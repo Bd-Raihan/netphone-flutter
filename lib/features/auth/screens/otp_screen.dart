@@ -183,6 +183,8 @@ class _OtpScreenState extends State<OtpScreen> {
             const SizedBox(height: 20),
 
             /// DEV OTP show
+
+            /*
             Container(
               padding: const EdgeInsets.all(14),
 
@@ -199,7 +201,7 @@ class _OtpScreenState extends State<OtpScreen> {
                 ],
               ),
             ),
-
+            */
             const SizedBox(height: 30),
 
             /// OTP Input
