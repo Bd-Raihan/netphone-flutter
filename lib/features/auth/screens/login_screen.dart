@@ -53,15 +53,11 @@ class _LoginScreenState extends State<LoginScreen> {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200 && data["ok"] == true) {
-        final devOtp = data["dev_otp"];
-
         if (!mounted) return;
 
         Navigator.push(
           context,
-          MaterialPageRoute(
-            builder: (_) => OtpScreen(phone: phone, devOtp: devOtp),
-          ),
+          MaterialPageRoute(builder: (_) => OtpScreen(phone: phone)),
         );
       } else {
         if (!mounted) return;
@@ -135,6 +131,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     decoration: InputDecoration(
                       prefixText: "+965 ",
                       hintText: "59859870",
+                      hintStyle: TextStyle(color: Colors.grey[400]),
                       filled: true,
                       fillColor: Colors.white,
                       border: OutlineInputBorder(

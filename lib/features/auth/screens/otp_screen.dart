@@ -20,9 +20,9 @@ import '../../../shared/services/storage_service.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phone;
-  final String devOtp;
+  final String? devOtp;
 
-  const OtpScreen({super.key, required this.phone, required this.devOtp});
+  const OtpScreen({super.key, required this.phone, this.devOtp});
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
