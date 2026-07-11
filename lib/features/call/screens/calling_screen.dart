@@ -5,7 +5,12 @@ import '../../recents/data/recent_calls_data.dart';
 import '../../wallet/data/wallet_data.dart';
 import '../data/country_rates.dart';
 import '../../call/utils/phone_validator.dart';
-import '../../wallet/data/wallet_api_service.dart';
+
+import '../data/call_api_service.dart';
+import '../../../core/config/app_config.dart';
+import '../../../shared/services/storage_service.dart';
+
+import 'package:flutter/services.dart';
 
 ///import 'package:share_plus/share_plus.dart';
 class CallingScreen extends StatefulWidget {
@@ -39,68 +44,123 @@ class _CallingScreenState extends State<CallingScreen> {
   Timer? timer;
   int seconds = 0;
   double callCost = 0.0;
+  double currentRateUsd = 0;
   bool firstMinuteCharged = false;
   late CountryRate currentCountryRate;
 
+  static const MethodChannel _voiceChannel = MethodChannel(
+    'netphone_twilio_voice',
+  );
+
   /// Wallet & Billing
   int? callSessionId;
+
+  Future<void> startBackendCall() async {
+    try {
+      final token = await StorageService.getToken();
+
+      final sessionResult = await CallApiService.startCall(
+        token: token ?? "",
+        phoneNumber: widget.phoneNumber,
+        baseUrl: AppConfig.baseUrl,
+      );
+
+      // print("📞 SESSION RESULT => $sessionResult");
+      final rawSessionId = sessionResult["session"]["id"];
+
+      final sessionData = sessionResult["session"];
+
+      final pricePerMinCentsRaw = sessionData["price_per_min_cents"] ?? 0;
+
+      final pricePerMinCents = pricePerMinCentsRaw is int
+          ? pricePerMinCentsRaw
+          : int.tryParse(pricePerMinCentsRaw.toString()) ?? 0;
+
+      currentRateUsd = pricePerMinCents / 100.0;
+
+      callSessionId = rawSessionId is int
+          ? rawSessionId
+          : int.parse(rawSessionId.toString());
+
+      final voiceTokenResult = await CallApiService.getVoiceToken(
+        token: token ?? "",
+        baseUrl: AppConfig.baseUrl,
+      );
+
+      await _voiceChannel.invokeMethod('startCall', {
+        'accessToken': voiceTokenResult["token"],
+        'to': widget.phoneNumber,
+        'sessionId': callSessionId.toString(),
+      });
+
+      setState(() {});
+      startCallStatusPolling();
+    } catch (e, s) {
+      print("❌ CALLING SCREEN ERROR => $e");
+      print("❌ STACK => $s");
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Call failed: $e")));
+      }
+    }
+  }
+
+  Timer? statusTimer;
+  bool hasAnswered = false;
+  bool showTimer = false;
+
+  void startCallStatusPolling() {
+    statusTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (callSessionId == null) return;
+
+      final token = await StorageService.getToken();
+      final result = await CallApiService.getCallStatus(
+        token: token ?? "",
+        sessionId: callSessionId!,
+        baseUrl: AppConfig.baseUrl,
+      );
+
+      final call = result["call"];
+      final callStatus = call["status"];
+      final providerStatus = call["provider_status"];
+      final durationSec = call["duration_sec"];
+
+      print(
+        "📞 STATUS => provider=$providerStatus, status=$callStatus, duration=$durationSec",
+      );
+
+      if (!hasAnswered &&
+          (providerStatus == "in-progress" || providerStatus == "answered")) {
+        hasAnswered = true;
+        showTimer = true;
+        startTimer();
+        setState(() {});
+      }
+
+      if (providerStatus == "completed" || callStatus == "charged") {
+        statusTimer?.cancel();
+      }
+    });
+  }
 
   @override
   void initState() {
     super.initState();
     currentCountryRate = getCountryRate(widget.phoneNumber);
-    startTimer();
+
+    startBackendCall();
   }
 
   void startTimer() {
-    timer = Timer.periodic(const Duration(seconds: 1), (timer) async {
+    timer?.cancel();
+
+    timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+
       setState(() {
         seconds++;
       });
-
-      /// ==========================
-      /// TELECOM BILLING LOGIC
-      /// ==========================
-
-      int chargedMinutes = 0;
-
-      if (seconds > 3) {
-        chargedMinutes = ((seconds - 1) ~/ 60) + 1;
-      }
-
-      double totalCost = chargedMinutes * currentCountryRate.ratePerMinute;
-
-      callCost = totalCost;
-
-      /// =========================
-      /// Insufficient Balance
-      /// =========================
-      if (currentBalance <= 0) {
-        timer.cancel();
-
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-
-          builder: (_) => AlertDialog(
-            title: const Text("Insufficient Balance"),
-
-            content: const Text("Your wallet balance is finished."),
-
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(context);
-
-                  Navigator.pop(context);
-                },
-
-                child: const Text("OK"),
-              ),
-            ],
-          ),
-        );
-      }
     });
   }
 
@@ -119,7 +179,7 @@ class _CallingScreenState extends State<CallingScreen> {
   @override
   void dispose() {
     timer?.cancel();
-
+    statusTimer?.cancel();
     super.dispose();
   }
 
@@ -152,8 +212,8 @@ class _CallingScreenState extends State<CallingScreen> {
                       scale: value,
 
                       child: Container(
-                        width: 90.w,
-                        height: 90.w,
+                        width: 60.w,
+                        height: 60.w,
 
                         decoration: BoxDecoration(
                           color: const Color.fromARGB(26, 161, 207, 250),
@@ -163,7 +223,7 @@ class _CallingScreenState extends State<CallingScreen> {
                         child: Icon(
                           Icons.person,
                           color: const Color.fromARGB(179, 252, 253, 255),
-                          size: 35.sp,
+                          size: 20.sp,
                         ),
                       ),
                     );
@@ -218,15 +278,17 @@ class _CallingScreenState extends State<CallingScreen> {
                 /// =====================================
                 /// Timer
                 /// =====================================
-                Text(
-                  formatTime(seconds),
-
-                  style: TextStyle(
-                    color: const Color.fromARGB(255, 0, 102, 255),
-                    fontSize: 20.sp,
-                    fontWeight: FontWeight.bold,
+                if (showTimer) ...[
+                  Text(
+                    formatTime(seconds),
+                    style: TextStyle(
+                      color: const Color.fromARGB(255, 0, 102, 255),
+                      fontSize: 20.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
+                  SizedBox(height: 10.h),
+                ],
 
                 SizedBox(height: 10.h),
 
@@ -245,7 +307,7 @@ class _CallingScreenState extends State<CallingScreen> {
                 /// Rate
                 /// =====================================
                 Text(
-                  "Per-minute rate: ${currentCountryRate.ratePerMinute.toStringAsFixed(3)} د.ك",
+                  "Per-minute rate: \$${currentRateUsd.toStringAsFixed(2)}/min",
 
                   style: TextStyle(color: Colors.white, fontSize: 15.sp),
                 ),
@@ -256,7 +318,7 @@ class _CallingScreenState extends State<CallingScreen> {
                 /// Minutes
                 /// =====================================
                 Text(
-                  "Remaining Minutes: ${(currentBalance / 0.004).floor()}",
+                  "Remaining Balance: \$${currentBalance.toStringAsFixed(2)} USD",
                   style: TextStyle(color: Colors.white, fontSize: 15.sp),
                 ),
 
@@ -275,9 +337,13 @@ class _CallingScreenState extends State<CallingScreen> {
 
                       isActive: isMuted,
 
-                      onTap: () {
+                      onTap: () async {
                         setState(() {
                           isMuted = !isMuted;
+                        });
+
+                        await _voiceChannel.invokeMethod('setMute', {
+                          'enabled': isMuted,
                         });
                       },
                     ),
@@ -301,9 +367,13 @@ class _CallingScreenState extends State<CallingScreen> {
 
                       isActive: isSpeakerOn,
 
-                      onTap: () {
+                      onTap: () async {
                         setState(() {
                           isSpeakerOn = !isSpeakerOn;
+                        });
+
+                        await _voiceChannel.invokeMethod('setSpeaker', {
+                          'enabled': isSpeakerOn,
                         });
                       },
                     ),
@@ -328,34 +398,75 @@ class _CallingScreenState extends State<CallingScreen> {
                               content: Text("Invalid Country Code or Number"),
                             ),
                           );
-
                           return;
                         }
-
                         timer?.cancel();
 
-                        /// ==========================
-                        /// TELECOM BILLING LOGIC
-                        /// ==========================
+                        statusTimer?.cancel();
 
-                        int chargedMinutes = 0;
-                        if (seconds > 3) {
-                          chargedMinutes = ((seconds - 1) ~/ 60) + 1;
+                        try {
+                          await _voiceChannel.invokeMethod('endCall');
+                        } catch (e) {
+                          print("❌ Native endCall failed => $e");
                         }
 
-                        callCost =
-                            chargedMinutes * currentCountryRate.ratePerMinute;
+                        final token = await StorageService.getToken();
 
-                        /// =========================
+                        if (callSessionId != null) {
+                          final endResult = await CallApiService.endCall(
+                            token: token ?? "",
+                            sessionId: callSessionId!,
+                            baseUrl: AppConfig.baseUrl,
+                          );
+                          //print("📞 END RESULT => $endResult");
+                          await Future.delayed(const Duration(seconds: 2));
+
+                          // এখন নতুন করে Backend থেকে Final Status আনো
+                          final finalStatus =
+                              await CallApiService.getCallStatus(
+                                token: token ?? "",
+                                sessionId: callSessionId!,
+                                baseUrl: AppConfig.baseUrl,
+                              );
+
+                          print("📞 END RESULT => $endResult");
+
+                          final callData =
+                              finalStatus["call"] ??
+                              finalStatus["session"] ??
+                              finalStatus;
+
+                          final chargedCentsRaw =
+                              callData["charged_amount_cents"] ??
+                              endResult["charged_amount_cents"] ??
+                              0;
+
+                          final chargedCents = chargedCentsRaw is int
+                              ? chargedCentsRaw
+                              : int.tryParse(chargedCentsRaw.toString()) ?? 0;
+
+                          callCost = chargedCents.abs() / 100.0;
+
+                          final wallet = endResult["wallet"];
+                          if (wallet != null &&
+                              wallet["balance_cents"] != null) {
+                            final balanceRaw = wallet["balance_cents"];
+                            final balanceCents = balanceRaw is int
+                                ? balanceRaw
+                                : int.tryParse(balanceRaw.toString()) ?? 0;
+
+                            currentBalance = balanceCents / 100.0;
+                          }
+                        }
+
                         /// Save Recent Call
-                        /// =========================
-
                         if (seconds > 0) {
                           recentCalls.insert(0, {
                             "name": widget.contactName,
                             "number": widget.phoneNumber,
                             "timeAgo": "Just now",
                             "duration": formatTime(seconds),
+                            "cost": "\$${callCost.toStringAsFixed(2)}",
                             "date": "Today",
                             "callTime": TimeOfDay.now().format(context),
                             "type": "outgoing",
@@ -367,8 +478,7 @@ class _CallingScreenState extends State<CallingScreen> {
                         /// =========================
                         /// Show Call Summary Popup
                         /// =========================
-                        await deductWalletBalance(callCost);
-                        currentBalance = await fetchWalletBalance();
+
                         setState(() {});
 
                         showDialog(
@@ -401,7 +511,7 @@ class _CallingScreenState extends State<CallingScreen> {
                                   SizedBox(height: 10),
 
                                   Text(
-                                    "Call Cost: ${callCost.toStringAsFixed(3)} KWD",
+                                    "Call Cost: \$${callCost.toStringAsFixed(2)} USD",
                                     style: const TextStyle(
                                       color: Colors.white70,
                                     ),
@@ -410,8 +520,7 @@ class _CallingScreenState extends State<CallingScreen> {
                                   SizedBox(height: 10),
 
                                   Text(
-                                    "Remaining Balance: ${currentBalance.toStringAsFixed(3)} KWD",
-
+                                    "Remaining Balance: \$${currentBalance.toStringAsFixed(2)} USD",
                                     style: const TextStyle(color: Colors.green),
                                   ),
                                 ],
@@ -421,6 +530,7 @@ class _CallingScreenState extends State<CallingScreen> {
                                 TextButton(
                                   onPressed: () {
                                     Navigator.pop(context);
+                                    Navigator.pop(context, true);
                                   },
 
                                   child: const Text(

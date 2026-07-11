@@ -5,6 +5,5 @@
 /// ==========================================================
 
 class AppConfig {
-  // ✅ তোমার নিজের PC IP বসাবে
   static const String baseUrl = "https://api.netphoneapp.com";
 }

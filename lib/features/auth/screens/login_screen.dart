@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../../core/config/app_config.dart';
 import 'otp_screen.dart';
+import 'package:intl_phone_field/intl_phone_field.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -15,6 +16,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController phoneController = TextEditingController();
 
+  String phoneE164 = '';
   bool isLoading = false;
 
   @override
@@ -24,11 +26,11 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> requestOtp() async {
-    final rawPhone = phoneController.text.trim();
+    final phone = phoneE164.trim();
 
-    if (rawPhone.isEmpty || rawPhone.length != 8) {
+    if (phone.isEmpty || !phone.startsWith('+') || phone.length < 8) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Enter valid Kuwait number")),
+        const SnackBar(content: Text("Enter valid mobile number")),
       );
       return;
     }
@@ -38,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
         isLoading = true;
       });
 
-      final phone = "+965$rawPhone";
+      final phone = phoneE164.trim();
 
       final url = Uri.parse("${AppConfig.baseUrl}/api/auth/request-otp");
 
@@ -97,7 +99,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   Icon(Icons.call, size: 90, color: AppColors.primary),
 
                   const SizedBox(height: 30),
-
                   Text(
                     "Welcome to NetPhone",
                     textAlign: TextAlign.center,
@@ -105,15 +106,12 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
 
                   const SizedBox(height: 10),
-
                   Text(
                     "Enter your mobile number to continue",
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-
                   const SizedBox(height: 40),
-
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
@@ -121,16 +119,14 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ),
-
                   const SizedBox(height: 10),
-
-                  TextField(
+                  IntlPhoneField(
                     controller: phoneController,
+                    initialCountryCode: 'KW',
                     keyboardType: TextInputType.phone,
                     textAlign: TextAlign.center,
                     decoration: InputDecoration(
-                      prefixText: "+965 ",
-                      hintText: "59859870",
+                      hintText: "Enter mobile number",
                       hintStyle: TextStyle(color: Colors.grey[400]),
                       filled: true,
                       fillColor: Colors.white,
@@ -139,10 +135,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         borderSide: BorderSide.none,
                       ),
                     ),
+                    onChanged: (phone) {
+                      phoneE164 = phone.completeNumber;
+                    },
                   ),
-
                   const SizedBox(height: 30),
-
                   SizedBox(
                     width: 220,
                     height: 50,

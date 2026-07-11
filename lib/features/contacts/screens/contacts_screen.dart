@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'contact_details_screen.dart';
+import '../../call/utils/phone_validator.dart';
 
 ///import 'package:share_plus/share_plus.dart';
 class ContactsScreen extends StatefulWidget {
@@ -79,26 +80,6 @@ class _ContactsScreenState extends State<ContactsScreen> {
     });
   }
 
-  bool isValidPhoneNumber(String number) {
-    if (number.startsWith("+880") && number.length == 14) {
-      return true;
-    }
-
-    if (number.startsWith("+965") && number.length == 12) {
-      return true;
-    }
-
-    if (number.startsWith("+91") && number.length == 13) {
-      return true;
-    }
-
-    if (number.startsWith("+92") && number.length == 13) {
-      return true;
-    }
-
-    return false;
-  }
-
   /// =========================
   /// UI
   /// =========================
@@ -157,6 +138,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           ? contact.phones.first.number
                           : "No Number";
 
+                      final cleanedPhone = normalizePhoneNumber(phone);
+
                       return ListTile(
                         leading: CircleAvatar(
                           radius: 24.r,
@@ -186,18 +169,32 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         ),
 
                         onTap: () {
-                          if (contact.phones.isNotEmpty) {
-                            Navigator.push(
-                              context,
-
-                              MaterialPageRoute(
-                                builder: (_) => ContactDetailsScreen(
-                                  phoneNumber: phone,
-                                  contactName: contact.displayName,
-                                ),
+                          if (contact.phones.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('No phone number found'),
                               ),
                             );
+                            return;
                           }
+
+                          final phoneNumbers = contact.phones
+                              .map(
+                                (phone) => normalizePhoneNumber(phone.number),
+                              )
+                              .where((number) => number.trim().isNotEmpty)
+                              .toSet()
+                              .toList();
+
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ContactDetailsScreen(
+                                contactName: contact.displayName,
+                                phoneNumbers: phoneNumbers,
+                              ),
+                            ),
+                          );
                         },
                       );
                     },

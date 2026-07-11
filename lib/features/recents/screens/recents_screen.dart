@@ -136,7 +136,7 @@ class RecentsScreen extends StatelessWidget {
 
                                   Expanded(
                                     child: Text(
-                                      "${call["timeAgo"]} • ${call["duration"]}",
+                                      "${call["timeAgo"]} • ${call["duration"]} • ${call["cost"] ?? "\$0.00"} • ${call["country"]} ",
 
                                       style: TextStyle(
                                         color: Colors.white54,
@@ -152,7 +152,7 @@ class RecentsScreen extends StatelessWidget {
                               SizedBox(height: 4.h),
 
                               Text(
-                                "${call["date"]} • ${call["callTime"]}",
+                                "${call["date"]} • ${call["callTime"]} • ${call["callType"]}",
 
                                 style: TextStyle(
                                   color: Colors.white38,

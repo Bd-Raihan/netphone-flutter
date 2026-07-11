@@ -37,7 +37,7 @@ Future<double> fetchWalletBalance() async {
         data["wallet"]["balance_cents"].toString(),
       );
 
-      return balanceCents / 1000;
+      return balanceCents / 100;
     }
 
     return 0.000;
@@ -57,27 +57,45 @@ Future<List<WalletTransaction>> fetchWalletTransactions() async {
 
     final response = await http.get(
       Uri.parse("${AppConfig.baseUrl}/api/wallet/tx"),
-      headers: {"Authorization": "Bearer $token"},
+      headers: {
+        "Authorization": "Bearer $token",
+        "Content-Type": "application/json",
+      },
     );
 
-    print("TX STATUS:");
-    print(response.statusCode);
+    print("TX STATUS: ${response.statusCode}");
+    print("TX BODY: ${response.body}");
 
-    print("TX BODY:");
-    print(response.body);
+    if (response.statusCode != 200) return [];
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+    final data = jsonDecode(response.body);
 
-      final List txList = data["items"];
+    final dynamic rawList =
+        data["items"] ??
+        data["transactions"] ??
+        data["data"]?["items"] ??
+        data["data"]?["transactions"];
 
-      return txList.map((e) => WalletTransaction.fromJson(e)).toList();
+    if (rawList is! List) {
+      print("TX PARSE ERROR: transactions list not found");
+      return [];
     }
 
-    return [];
+    final result = <WalletTransaction>[];
+
+    for (final item in rawList) {
+      try {
+        result.add(WalletTransaction.fromJson(item));
+      } catch (e) {
+        print("TX ITEM PARSE ERROR: $e");
+        print("TX ITEM: $item");
+      }
+    }
+
+    print("TX PARSED COUNT: ${result.length}");
+    return result;
   } catch (e) {
-    print("TX ERROR:");
-    print(e);
+    print("TX ERROR: $e");
     return [];
   }
 }
@@ -87,7 +105,7 @@ Future<List<WalletTransaction>> fetchWalletTransactions() async {
 /// ===============================
 Future<bool> creditWalletBalance(double amount) async {
   try {
-    final amountCents = (amount * 1000).toInt();
+    final amountCents = (amount * 100).round();
 
     final response = await http.post(
       Uri.parse("${AppConfig.baseUrl}/api/wallet/credit"),
@@ -99,7 +117,7 @@ Future<bool> creditWalletBalance(double amount) async {
 
       body: jsonEncode({
         "amount_cents": amountCents,
-        "currency": "KWD",
+        "currency": "USD",
         "meta": {"type": "mobile_recharge"},
       }),
     );
@@ -127,7 +145,7 @@ Future<bool> creditWalletBalance(double amount) async {
 /// ===============================
 Future<void> deductWalletBalance(double amount) async {
   try {
-    final amountCents = (amount * 1000).toInt();
+    final amountCents = (amount * 100).round();
 
     final response = await http.post(
       Uri.parse("${AppConfig.baseUrl}/api/wallet/debit"),
@@ -137,7 +155,7 @@ Future<void> deductWalletBalance(double amount) async {
         "Content-Type": "application/json",
       },
 
-      body: jsonEncode({"amount_cents": amountCents, "currency": "KWD"}),
+      body: jsonEncode({"amount_cents": amountCents, "currency": "USD"}),
     );
 
     print("DEBIT STATUS:");

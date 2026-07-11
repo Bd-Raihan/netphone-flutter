@@ -17,11 +17,18 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 ///import 'features/navigation/screens/main_navigation_screen.dart';
 import 'features/auth/screens/auth_wrapper_screen.dart';
 import 'features/recents/data/recent_calls_data.dart';
+import 'package:flutter/services.dart';
 
 ///import 'features/wallet/data/wallet_data.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 👉 শুধুই Portrait মোড
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
 
   await loadRecentCalls();
 

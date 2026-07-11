@@ -1,17 +1,64 @@
 import '../data/wallet_api_service.dart';
+import '../../../shared/services/storage_service.dart';
 
 /// =======================================
 /// SINGLE REAL BALANCE SOURCE
-double currentBalance = 0.000;
+/// Database balance_cents = USD cents
+/// 100 cents = 1.00 USD
+double currentBalance = 0.00;
 
 /// =======================================
-/// USD Conversion Rate
-const double usdRate = 3.25;
+/// Display currency model
+class DisplayCurrency {
+  final String code;
+  final String symbol;
+  final double rateFromUsd;
 
+  const DisplayCurrency({
+    required this.code,
+    required this.symbol,
+    required this.rateFromUsd,
+  });
+}
+
+/// =======================================
+/// Country/phone based currency
+DisplayCurrency getDisplayCurrencyByPhone(String? phone) {
+  final p = phone ?? '';
+
+  if (p.startsWith('+880')) {
+    return const DisplayCurrency(code: 'BDT', symbol: '৳', rateFromUsd: 122.00);
+  }
+
+  if (p.startsWith('+965')) {
+    return const DisplayCurrency(
+      code: 'KWD',
+      symbol: 'KWD',
+      rateFromUsd: 0.307,
+    );
+  }
+
+  if (p.startsWith('+91')) {
+    return const DisplayCurrency(code: 'INR', symbol: '₹', rateFromUsd: 83.00);
+  }
+
+  if (p.startsWith('+966')) {
+    return const DisplayCurrency(code: 'SAR', symbol: 'SAR', rateFromUsd: 3.75);
+  }
+
+  if (p.startsWith('+971')) {
+    return const DisplayCurrency(code: 'AED', symbol: 'AED', rateFromUsd: 3.67);
+  }
+
+  return const DisplayCurrency(code: 'USD', symbol: r'$', rateFromUsd: 1.00);
+}
+
+/// =======================================
 /// Minutes Calculation
+/// For now: 1 USD = 25 minutes
 int getRemainingMinutes() {
-  const double perMinuteRate = 0.004;
-  return (currentBalance / perMinuteRate).floor();
+  const double perMinuteRateUsd = 0.08; // 1 USD = 12.5 minutes
+  return (currentBalance / perMinuteRateUsd).floor();
 }
 
 /// =======================================
@@ -41,6 +88,6 @@ class WalletTransaction {
     );
   }
 
-  double get amount => amountCents / 1000;
-  double get balanceAfter => balanceAfterCents / 1000;
+  double get amount => amountCents / 100;
+  double get balanceAfter => balanceAfterCents / 100;
 }
