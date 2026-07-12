@@ -1,4 +1,4 @@
-package com.netphone.app
+package com.netphoneapp.call
 
 import android.app.Notification
 import android.app.NotificationChannel

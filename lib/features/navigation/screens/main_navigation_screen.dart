@@ -137,7 +137,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   Share.share(
                     "Download NetPhone App\n\n"
                     "Cheap Rates International Calls 🌍\n"
-                    "https://play.google.com/store/apps/details?id=com.netphone.app",
+                    "https://play.google.com/store/apps/details?id=com.netphone.call",
                   );
                 },
                 icon: Icon(Icons.share, color: Colors.white, size: 22.sp),
@@ -342,7 +342,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         Share.share(
                           "Download NetPhone App\n\n"
                           "Cheap Rates International Calls 🌍\n"
-                          "https://play.google.com/store/apps/details?id=com.netphone.app",
+                          "https://play.google.com/store/apps/details?id=com.netphone.call",
                         );
                       },
                     ),

@@ -18,7 +18,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.netphone.app"
+    namespace = "com.netphoneapp.call"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
@@ -32,7 +32,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.netphone.app"
+        applicationId = "com.netphoneapp.call"
 
         minSdk = 26
         targetSdk = flutter.targetSdkVersion
