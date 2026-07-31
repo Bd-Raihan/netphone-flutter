@@ -48,6 +48,12 @@ class _AdminProfitDashboardScreenState
     return '\$${n.toStringAsFixed(2)}';
   }
 
+  String ratePerMinute(dynamic value) {
+    final n = double.tryParse(value?.toString() ?? '0') ?? 0;
+
+    return '\$${n.toStringAsFixed(4)}/min';
+  }
+
   String percent(dynamic value) {
     final n = double.tryParse(value.toString()) ?? 0;
     return '${n.toStringAsFixed(2)}%';
@@ -152,10 +158,20 @@ class _AdminProfitDashboardScreenState
       mainAxisSpacing: 12,
       children: [
         _card('Total Calls', '${item['total_calls'] ?? 0}'),
+
         _card('Total Minutes', '${item['total_minutes'] ?? 0}'),
+
+        _card(
+          'Avg Rate / Min',
+          ratePerMinute(item['avg_sell_rate_usd_per_min']),
+        ),
+
         _card('Revenue', money(item['total_revenue'])),
+
         _card('Provider Cost', money(item['total_provider_cost'])),
+
         _card('Net Profit', money(item['total_profit'])),
+
         _card('Profit %', percent(item['profit_percent'])),
       ],
     );
@@ -197,6 +213,7 @@ class _AdminProfitDashboardScreenState
           DataColumn(label: Text('Registered Number')),
           DataColumn(label: Text('Calls')),
           DataColumn(label: Text('Min')),
+          DataColumn(label: Text('Rate / Min')),
           DataColumn(label: Text('Revenue')),
           DataColumn(label: Text('Provider Cost')),
           DataColumn(label: Text('Net Profit')),
@@ -210,8 +227,9 @@ class _AdminProfitDashboardScreenState
               DataCell(Text('${r['registered_number'] ?? ''}')),
               DataCell(Text('${r['total_calls'] ?? 0}')),
               DataCell(Text('${r['total_minutes'] ?? 0}')),
+              DataCell(Text(ratePerMinute(r['avg_sell_rate_usd_per_min']))),
               DataCell(Text(money(r['total_user_paid']))),
-              DataCell(Text(money(r['total_twilio_cost']))),
+              DataCell(Text(money(r['total_provider_cost']))),
               DataCell(Text(money(r['total_profit']))),
               DataCell(Text(percent(r['profit_percent']))),
             ],

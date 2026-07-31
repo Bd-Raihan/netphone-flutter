@@ -8,6 +8,12 @@ class AdminProfitPdfService {
     return '\$${n.toStringAsFixed(2)}';
   }
 
+  static String _ratePerMinute(dynamic value) {
+    final n = double.tryParse(value?.toString() ?? '0') ?? 0;
+
+    return '\$${n.toStringAsFixed(4)}/min';
+  }
+
   static String _percent(dynamic value) {
     final n = double.tryParse(value.toString()) ?? 0;
     return '${n.toStringAsFixed(2)}%';
@@ -70,11 +76,13 @@ class AdminProfitPdfService {
       headers: [
         'No',
         'Country',
+        'Registered Number',
         'Calls',
-        'Minutes',
+        'Min',
+        'Rate / Min',
         'Revenue',
         'Provider Cost',
-        'Profit',
+        'Net Profit',
         'Profit %',
       ],
       rows: rows.map<List<String>>((r) {
@@ -83,8 +91,9 @@ class AdminProfitPdfService {
           '${r['country_name'] ?? 'Unknown'}',
           '${r['total_calls'] ?? 0}',
           '${r['total_minutes'] ?? 0}',
+          _ratePerMinute(r['avg_sell_rate_usd_per_min']),
           _money(r['total_user_paid']),
-          _money(r['total_twilio_cost']),
+          _money(r['total_provider_cost']),
           _money(r['total_profit']),
           _percent(r['profit_percent']),
         ];
@@ -96,6 +105,7 @@ class AdminProfitPdfService {
     return [
       ['Total Calls', '${data['total_calls'] ?? 0}'],
       ['Total Minutes', '${data['total_minutes'] ?? 0}'],
+      ['Average Rate / Min', _ratePerMinute(data['avg_sell_rate_usd_per_min'])],
       ['Revenue', _money(data['total_revenue'])],
       ['Provider Cost', _money(data['total_provider_cost'])],
       ['Net Profit', _money(data['total_profit'])],
