@@ -25,6 +25,7 @@ import '../../settings/screens/settings_screen.dart';
 import '../../admin_profit/screens/admin_profit_dashboard_screen.dart';
 import '../../app_pages/screens/app_page_screen.dart';
 import '../../rates/screens/rates_screen.dart';
+import '../../admin_rate_management/screens/admin_rate_management_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -179,7 +180,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                     Text(
                       userPhone,
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.85),
+                        color: const Color.fromARGB(
+                          255,
+                          231,
+                          226,
+                          226,
+                        ).withValues(alpha: 0.25),
                         fontSize: 15.sp,
                       ),
                     ),
@@ -190,7 +196,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         vertical: 4.h,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.16),
+                        color: const Color.fromARGB(
+                          255,
+                          231,
+                          226,
+                          226,
+                        ).withValues(alpha: 0.25),
                         borderRadius: BorderRadius.circular(20.r),
                       ),
                       child: Text(
@@ -264,6 +275,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                             context,
                             MaterialPageRoute(
                               builder: (_) => const AdminCryptoRechargeScreen(),
+                            ),
+                          );
+                        },
+                      ),
+
+                    if (isAdmin)
+                      buildDrawerItem(
+                        context: context,
+                        icon: Icons.route,
+                        title: "Rate Management",
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminRateManagementScreen(),
                             ),
                           );
                         },
