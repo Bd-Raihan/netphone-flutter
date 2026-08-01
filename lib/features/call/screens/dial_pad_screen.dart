@@ -240,7 +240,6 @@ class _DialPadScreenState extends State<DialPadScreen> {
                               ),
 
                               SizedBox(height: 12.h),
-
                               Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,

@@ -7,10 +7,12 @@ import '../data/country_rates.dart';
 import '../../call/utils/phone_validator.dart';
 
 import '../data/call_api_service.dart';
+import '../models/telnyx_voice_state.dart';
+import '../services/telnyx_voice_service.dart';
+import '../../../services/native_call_service.dart';
 import '../../../core/config/app_config.dart';
 import '../../../shared/services/storage_service.dart';
-
-import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 ///import 'package:share_plus/share_plus.dart';
 class CallingScreen extends StatefulWidget {
@@ -28,6 +30,15 @@ class CallingScreen extends StatefulWidget {
 }
 
 class _CallingScreenState extends State<CallingScreen> {
+  final TelnyxVoiceService _voiceService = TelnyxVoiceService();
+
+  StreamSubscription<TelnyxVoiceState>? _voiceStateSubscription;
+
+  String callStatusText = 'Calling';
+
+  bool _isEndingCall = false;
+  bool _summaryShown = false;
+
   /// =========================================
   /// Button States
   /// =========================================
@@ -35,8 +46,6 @@ class _CallingScreenState extends State<CallingScreen> {
   bool isMuted = false;
   bool isSpeakerOn = false;
   bool isBluetoothOn = false;
-  bool isRecording = false;
-  bool showKeypad = false;
 
   /// =========================================
   /// Timer
@@ -48,98 +57,313 @@ class _CallingScreenState extends State<CallingScreen> {
   bool firstMinuteCharged = false;
   late CountryRate currentCountryRate;
 
-  static const MethodChannel _voiceChannel = MethodChannel(
-    'netphone_twilio_voice',
-  );
-
   /// Wallet & Billing
   int? callSessionId;
-
-  Future<void> startBackendCall() async {
-    try {
-      final token = await StorageService.getToken();
-
-      final sessionResult = await CallApiService.startCall(
-        token: token ?? "",
-        phoneNumber: widget.phoneNumber,
-        baseUrl: AppConfig.baseUrl,
-      );
-
-      // print("📞 SESSION RESULT => $sessionResult");
-      final rawSessionId = sessionResult["session"]["id"];
-
-      final sessionData = sessionResult["session"];
-
-      final pricePerMinCentsRaw = sessionData["price_per_min_cents"] ?? 0;
-
-      final pricePerMinCents = pricePerMinCentsRaw is int
-          ? pricePerMinCentsRaw
-          : int.tryParse(pricePerMinCentsRaw.toString()) ?? 0;
-
-      currentRateUsd = pricePerMinCents / 100.0;
-
-      callSessionId = rawSessionId is int
-          ? rawSessionId
-          : int.parse(rawSessionId.toString());
-
-      final voiceTokenResult = await CallApiService.getVoiceToken(
-        token: token ?? "",
-        baseUrl: AppConfig.baseUrl,
-      );
-
-      await _voiceChannel.invokeMethod('startCall', {
-        'accessToken': voiceTokenResult["token"],
-        'to': widget.phoneNumber,
-        'sessionId': callSessionId.toString(),
-      });
-
-      setState(() {});
-      startCallStatusPolling();
-    } catch (e, s) {
-      print("❌ CALLING SCREEN ERROR => $e");
-      print("❌ STACK => $s");
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("Call failed: $e")));
-      }
-    }
-  }
 
   Timer? statusTimer;
   bool hasAnswered = false;
   bool showTimer = false;
 
-  void startCallStatusPolling() {
-    statusTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
-      if (callSessionId == null) return;
+  void listenToTelnyxVoiceState() {
+    _voiceStateSubscription?.cancel();
+
+    _voiceStateSubscription = _voiceService.states.listen(
+      (TelnyxVoiceState voiceState) {
+        if (!mounted) {
+          return;
+        }
+
+        String nextStatusText = callStatusText;
+
+        switch (voiceState.status) {
+          case TelnyxVoiceStatus.idle:
+          case TelnyxVoiceStatus.requestingPermission:
+          case TelnyxVoiceStatus.creatingSession:
+          case TelnyxVoiceStatus.requestingToken:
+          case TelnyxVoiceStatus.connecting:
+          case TelnyxVoiceStatus.registered:
+          case TelnyxVoiceStatus.initiating:
+            nextStatusText = 'Calling';
+            break;
+
+          case TelnyxVoiceStatus.ringing:
+            nextStatusText = 'Ringing';
+            break;
+
+          case TelnyxVoiceStatus.active:
+            // Call receive হওয়ার পর status text লুকানো হবে।
+            // নিচে শুধু call timer চলবে।
+            nextStatusText = '';
+
+            if (!hasAnswered) {
+              hasAnswered = true;
+              showTimer = true;
+              startTimer();
+            }
+            break;
+
+          case TelnyxVoiceStatus.reconnecting:
+            nextStatusText = 'Calling';
+            break;
+
+          case TelnyxVoiceStatus.ending:
+          case TelnyxVoiceStatus.ended:
+            nextStatusText = 'Call ended';
+            break;
+
+          case TelnyxVoiceStatus.failed:
+            nextStatusText = 'Call failed';
+            break;
+        }
+
+        setState(() {
+          callStatusText = nextStatusText;
+          isMuted = voiceState.isMuted;
+          isSpeakerOn = voiceState.isSpeakerEnabled;
+        });
+
+        if (voiceState.status == TelnyxVoiceStatus.failed) {
+          final errorMessage = voiceState.errorMessage ?? 'Telnyx call failed';
+
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(errorMessage)));
+
+          Future<void>.microtask(endCurrentCall);
+        }
+
+        if (voiceState.status == TelnyxVoiceStatus.ended) {
+          Future<void>.microtask(endCurrentCall);
+        }
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('❌ TELNYX STATE LISTENER ERROR => $error');
+        debugPrintStack(stackTrace: stackTrace);
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          callStatusText = 'Call failed';
+        });
+
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Telnyx call failed: $error')));
+      },
+    );
+  }
+
+  Future<void> startBackendCall() async {
+    try {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        callStatusText = 'Calling';
+      });
 
       final token = await StorageService.getToken();
-      final result = await CallApiService.getCallStatus(
-        token: token ?? "",
-        sessionId: callSessionId!,
+
+      if (token == null || token.trim().isEmpty) {
+        throw Exception('Login token not found. Please login again.');
+      }
+
+      final sessionResult = await CallApiService.startCall(
+        token: token,
+        phoneNumber: widget.phoneNumber,
         baseUrl: AppConfig.baseUrl,
       );
 
-      final call = result["call"];
-      final callStatus = call["status"];
-      final providerStatus = call["provider_status"];
-      final durationSec = call["duration_sec"];
+      final sessionRaw = sessionResult['session'];
 
-      print(
-        "📞 STATUS => provider=$providerStatus, status=$callStatus, duration=$durationSec",
-      );
-
-      if (!hasAnswered &&
-          (providerStatus == "in-progress" || providerStatus == "answered")) {
-        hasAnswered = true;
-        showTimer = true;
-        startTimer();
-        setState(() {});
+      if (sessionRaw is! Map) {
+        throw const FormatException(
+          'Backend response does not contain a valid call session.',
+        );
       }
 
-      if (providerStatus == "completed" || callStatus == "charged") {
-        statusTimer?.cancel();
+      final sessionData = Map<String, dynamic>.from(sessionRaw);
+
+      final sessionIdRaw = sessionData['id'];
+
+      final parsedSessionId = sessionIdRaw is int
+          ? sessionIdRaw
+          : int.tryParse(sessionIdRaw?.toString() ?? '');
+
+      if (parsedSessionId == null || parsedSessionId <= 0) {
+        throw const FormatException(
+          'Backend returned an invalid call session ID.',
+        );
+      }
+
+      final webrtcRaw = sessionResult['webrtc'];
+
+      if (webrtcRaw is! Map) {
+        throw const FormatException(
+          'Backend response does not contain WebRTC call information.',
+        );
+      }
+
+      final webrtcData = Map<String, dynamic>.from(webrtcRaw);
+
+      final clientState = webrtcData['client_state']?.toString().trim();
+
+      if (clientState == null || clientState.isEmpty) {
+        throw const FormatException(
+          'Backend did not return WebRTC client state.',
+        );
+      }
+
+      final sellRateRaw = sessionData['sell_rate_usd_per_min'];
+      final pricePerMinCentsRaw = sessionData['price_per_min_cents'];
+
+      final sellRateUsd = double.tryParse(sellRateRaw?.toString() ?? '');
+
+      final pricePerMinCents = int.tryParse(
+        pricePerMinCentsRaw?.toString() ?? '',
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      double? rateToSave;
+
+      if (sellRateUsd != null && sellRateUsd > 0) {
+        rateToSave = sellRateUsd;
+      } else if (pricePerMinCents != null && pricePerMinCents > 0) {
+        rateToSave = pricePerMinCents / 100.0;
+      }
+
+      if (rateToSave != null) {
+        final prefs = await SharedPreferences.getInstance();
+
+        await prefs.setDouble('last_call_sell_rate_usd_per_min', rateToSave);
+
+        await prefs.setString(
+          'last_call_country_name',
+          currentCountryRate.countryName,
+        );
+      }
+
+      setState(() {
+        callSessionId = parsedSessionId;
+        callStatusText = 'Calling';
+
+        if (sellRateUsd != null && sellRateUsd > 0) {
+          currentRateUsd = sellRateUsd;
+        } else if (pricePerMinCents != null && pricePerMinCents > 0) {
+          currentRateUsd = pricePerMinCents / 100.0;
+        }
+      });
+
+      startCallStatusPolling();
+
+      final tokenResult = await CallApiService.getWebrtcToken(
+        token: token,
+        baseUrl: AppConfig.baseUrl,
+      );
+
+      final sipToken = tokenResult['token']?.toString().trim();
+      final callerIdName = tokenResult['caller_id_name']?.toString().trim();
+      final callerIdNumber = tokenResult['caller_id_number']?.toString().trim();
+
+      if (sipToken == null || sipToken.isEmpty) {
+        throw const FormatException(
+          'Backend did not return a Telnyx WebRTC token.',
+        );
+      }
+
+      if (callerIdNumber == null || callerIdNumber.isEmpty) {
+        throw const FormatException(
+          'Backend did not return a caller ID number.',
+        );
+      }
+
+      final safeCallerIdName = callerIdName == null || callerIdName.isEmpty
+          ? 'NetPhone'
+          : callerIdName;
+
+      await _voiceService.ensureMicrophonePermission();
+      await NativeCallService.start(); // <-- নতুন লাইন
+      await _voiceService.connectWithToken(
+        sipToken: sipToken,
+        callerIdName: safeCallerIdName,
+        callerIdNumber: callerIdNumber,
+      );
+
+      await _voiceService.startOutboundCall(
+        callerIdName: safeCallerIdName,
+        callerIdNumber: callerIdNumber,
+        destinationNumber: widget.phoneNumber,
+        clientState: clientState,
+      );
+    } catch (error, stackTrace) {
+      await NativeCallService.stop();
+      debugPrint('❌ START TELNYX CALL ERROR => $error');
+      debugPrintStack(stackTrace: stackTrace);
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        callStatusText = 'Call failed';
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Call failed: $error')));
+
+      await endCurrentCall();
+    }
+  }
+
+  void startCallStatusPolling() {
+    statusTimer?.cancel();
+
+    statusTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!mounted || callSessionId == null) return;
+
+      try {
+        final token = await StorageService.getToken();
+
+        final result = await CallApiService.getCallStatus(
+          token: token ?? '',
+          sessionId: callSessionId!,
+          baseUrl: AppConfig.baseUrl,
+        );
+
+        final callRaw = result['call'];
+
+        if (callRaw is! Map) {
+          debugPrint('Invalid call status response: $result');
+          return;
+        }
+
+        final call = Map<String, dynamic>.from(callRaw);
+        final callStatus = call['status']?.toString() ?? '';
+        final providerStatus = call['provider_status']?.toString() ?? '';
+
+        if (!mounted) return;
+
+        if (!hasAnswered &&
+            (providerStatus == 'in-progress' || providerStatus == 'answered')) {
+          hasAnswered = true;
+          showTimer = true;
+          startTimer();
+          setState(() {});
+        }
+
+        if (providerStatus == 'completed' || callStatus == 'charged') {
+          statusTimer?.cancel();
+        }
+      } catch (error, stackTrace) {
+        debugPrint('Call status polling failed: $error');
+        debugPrintStack(stackTrace: stackTrace);
       }
     });
   }
@@ -147,9 +371,16 @@ class _CallingScreenState extends State<CallingScreen> {
   @override
   void initState() {
     super.initState();
+
     currentCountryRate = getCountryRate(widget.phoneNumber);
 
-    startBackendCall();
+    listenToTelnyxVoiceState();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        startBackendCall();
+      }
+    });
   }
 
   void startTimer() {
@@ -176,10 +407,235 @@ class _CallingScreenState extends State<CallingScreen> {
     return "$min:$sec";
   }
 
+  /// =========================================
+  /// Call Finalization
+  /// =========================================
+  String _formatRate(double rate) {
+    if (rate <= 0) return "0.0000";
+
+    return rate
+        .toStringAsFixed(4)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  double? _readFiniteDouble(Map<String, dynamic> source, String key) {
+    final parsed = double.tryParse(source[key]?.toString() ?? '');
+
+    if (parsed == null || !parsed.isFinite) {
+      return null;
+    }
+
+    return parsed;
+  }
+
+  int? _readInteger(Map<String, dynamic> source, String key) {
+    return int.tryParse(source[key]?.toString() ?? '');
+  }
+
+  /// Call charge-এর জন্য 4 decimal দেখাবে।
+  /// Example:
+  /// 0.0503 => 0.0503
+  /// 0.0070 => 0.0070
+  String _formatCallAmount(double amount) {
+    if (!amount.isFinite || amount <= 0) {
+      return '0.0000';
+    }
+
+    return amount.abs().toStringAsFixed(4);
+  }
+
+  Future<void> endCurrentCall() async {
+    if (_isEndingCall || _summaryShown) {
+      return;
+    }
+    final callTimeText = TimeOfDay.now().format(context);
+
+    _isEndingCall = true;
+
+    timer?.cancel();
+    statusTimer?.cancel();
+
+    if (mounted) {
+      setState(() {
+        callStatusText = 'Ending';
+      });
+    }
+
+    try {
+      try {
+        await _voiceService.endCall();
+        await NativeCallService.stop();
+      } catch (error, stackTrace) {
+        debugPrint('⚠️ TELNYX END ERROR => $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
+
+      final token = await StorageService.getToken();
+
+      Map<String, dynamic> endResult = <String, dynamic>{};
+      Map<String, dynamic> finalStatus = <String, dynamic>{};
+
+      if (callSessionId != null && token != null && token.trim().isNotEmpty) {
+        try {
+          endResult = await CallApiService.endCall(
+            token: token,
+            sessionId: callSessionId!,
+            baseUrl: AppConfig.baseUrl,
+          );
+
+          await Future<void>.delayed(const Duration(seconds: 2));
+
+          finalStatus = await CallApiService.getCallStatus(
+            token: token,
+            sessionId: callSessionId!,
+            baseUrl: AppConfig.baseUrl,
+          );
+        } catch (error, stackTrace) {
+          debugPrint('⚠️ BACKEND CALL FINALIZATION ERROR => $error');
+          debugPrintStack(stackTrace: stackTrace);
+        }
+      }
+
+      final dynamic callDataRaw =
+          finalStatus['call'] ?? finalStatus['session'] ?? finalStatus;
+
+      final callData = callDataRaw is Map
+          ? Map<String, dynamic>.from(callDataRaw)
+          : <String, dynamic>{};
+
+      /// Exact decimal USD first.
+      final chargedUsd =
+          _readFiniteDouble(callData, 'charged_amount_usd') ??
+          _readFiniteDouble(endResult, 'charged_amount_usd');
+
+      /// Exact micro-USD second.
+      final chargedMicroUsd =
+          _readInteger(callData, 'charged_amount_microusd') ??
+          _readInteger(endResult, 'charged_amount_microusd');
+
+      /// Legacy cents final fallback.
+      final chargedCents =
+          _readInteger(callData, 'charged_amount_cents') ??
+          _readInteger(endResult, 'charged_amount_cents') ??
+          0;
+
+      if (chargedUsd != null) {
+        callCost = chargedUsd.abs();
+      } else if (chargedMicroUsd != null) {
+        callCost = chargedMicroUsd.abs() / 1000000.0;
+      } else {
+        callCost = chargedCents.abs() / 100.0;
+      }
+
+      final walletRaw = endResult['wallet'];
+
+      if (walletRaw is Map) {
+        final wallet = Map<String, dynamic>.from(walletRaw);
+
+        final balanceUsd = _readFiniteDouble(wallet, 'balance_usd');
+
+        final balanceMicroUsd = _readInteger(wallet, 'balance_microusd');
+
+        final balanceCents = _readInteger(wallet, 'balance_cents');
+
+        if (balanceUsd != null) {
+          currentBalance = balanceUsd;
+        } else if (balanceMicroUsd != null) {
+          currentBalance = balanceMicroUsd / 1000000.0;
+        } else if (balanceCents != null) {
+          currentBalance = balanceCents / 100.0;
+        }
+      }
+
+      if (seconds > 0) {
+        recentCalls.insert(0, {
+          'name': widget.contactName,
+          'number': widget.phoneNumber,
+          'timeAgo': 'Just now',
+          'duration': formatTime(seconds),
+          'cost': '\$${_formatCallAmount(callCost)}',
+          'date': 'Today',
+          'callTime': callTimeText,
+          'type': 'outgoing',
+        });
+
+        await saveRecentCalls();
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        callStatusText = 'Call ended';
+      });
+
+      _summaryShown = true;
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            backgroundColor: Colors.black,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Text(
+              'Call Summary',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Duration: ${formatTime(seconds)}',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Call Cost: \$${_formatCallAmount(callCost)} USD',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Remaining Balance: '
+                  '\$${currentBalance.toStringAsFixed(2)} USD',
+                  style: const TextStyle(color: Colors.green),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(dialogContext);
+                },
+                child: const Text('OK', style: TextStyle(color: Colors.blue)),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } finally {
+      _isEndingCall = false;
+    }
+  }
+
   @override
   void dispose() {
     timer?.cancel();
     statusTimer?.cancel();
+
+    _voiceStateSubscription?.cancel();
+
+    unawaited(_voiceService.dispose());
+
     super.dispose();
   }
 
@@ -235,15 +691,17 @@ class _CallingScreenState extends State<CallingScreen> {
                 /// =====================================
                 /// Ringing
                 /// =====================================
-                Text(
-                  "Ringing",
-
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20.sp,
-                    fontWeight: FontWeight.bold,
+                if (callStatusText.isNotEmpty) ...[
+                  Text(
+                    callStatusText,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20.sp,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
+                  SizedBox(height: 10.h),
+                ],
 
                 SizedBox(height: 10.h),
 
@@ -307,8 +765,7 @@ class _CallingScreenState extends State<CallingScreen> {
                 /// Rate
                 /// =====================================
                 Text(
-                  "Per-minute rate: \$${currentRateUsd.toStringAsFixed(2)}/min",
-
+                  "Per-minute rate: \$${_formatRate(currentRateUsd)}/min",
                   style: TextStyle(color: Colors.white, fontSize: 15.sp),
                 ),
 
@@ -338,28 +795,30 @@ class _CallingScreenState extends State<CallingScreen> {
                       isActive: isMuted,
 
                       onTap: () async {
-                        setState(() {
-                          isMuted = !isMuted;
-                        });
+                        final nextMutedState = !isMuted;
 
-                        await _voiceChannel.invokeMethod('setMute', {
-                          'enabled': isMuted,
-                        });
+                        try {
+                          await _voiceService.setMuted(nextMutedState);
+
+                          if (!mounted) {
+                            return;
+                          }
+
+                          setState(() {
+                            isMuted = nextMutedState;
+                          });
+                        } catch (error) {
+                          if (!mounted) {
+                            return;
+                          }
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Mute failed: $error')),
+                          );
+                        }
                       },
                     ),
 
-                    buildCallButton(
-                      icon: Icons.fiber_manual_record,
-                      label: "Rec",
-
-                      isActive: isRecording,
-
-                      onTap: () {
-                        setState(() {
-                          isRecording = !isRecording;
-                        });
-                      },
-                    ),
                     buildCallButton(
                       icon: isSpeakerOn ? Icons.volume_up : Icons.hearing,
 
@@ -368,13 +827,29 @@ class _CallingScreenState extends State<CallingScreen> {
                       isActive: isSpeakerOn,
 
                       onTap: () async {
-                        setState(() {
-                          isSpeakerOn = !isSpeakerOn;
-                        });
+                        final nextSpeakerState = !isSpeakerOn;
 
-                        await _voiceChannel.invokeMethod('setSpeaker', {
-                          'enabled': isSpeakerOn,
-                        });
+                        try {
+                          await _voiceService.setSpeakerEnabled(
+                            nextSpeakerState,
+                          );
+
+                          if (!mounted) {
+                            return;
+                          }
+
+                          setState(() {
+                            isSpeakerOn = nextSpeakerState;
+                          });
+                        } catch (error) {
+                          if (!mounted) {
+                            return;
+                          }
+
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Speaker failed: $error')),
+                          );
+                        }
                       },
                     ),
                   ],
@@ -395,153 +870,13 @@ class _CallingScreenState extends State<CallingScreen> {
                         if (!isValidPhoneNumber(widget.phoneNumber)) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                              content: Text("Invalid Country Code or Number"),
+                              content: Text('Invalid Country Code or Number'),
                             ),
                           );
                           return;
                         }
-                        timer?.cancel();
 
-                        statusTimer?.cancel();
-
-                        try {
-                          await _voiceChannel.invokeMethod('endCall');
-                        } catch (e) {
-                          print("❌ Native endCall failed => $e");
-                        }
-
-                        final token = await StorageService.getToken();
-
-                        if (callSessionId != null) {
-                          final endResult = await CallApiService.endCall(
-                            token: token ?? "",
-                            sessionId: callSessionId!,
-                            baseUrl: AppConfig.baseUrl,
-                          );
-                          //print("📞 END RESULT => $endResult");
-                          await Future.delayed(const Duration(seconds: 2));
-
-                          // এখন নতুন করে Backend থেকে Final Status আনো
-                          final finalStatus =
-                              await CallApiService.getCallStatus(
-                                token: token ?? "",
-                                sessionId: callSessionId!,
-                                baseUrl: AppConfig.baseUrl,
-                              );
-
-                          print("📞 END RESULT => $endResult");
-
-                          final callData =
-                              finalStatus["call"] ??
-                              finalStatus["session"] ??
-                              finalStatus;
-
-                          final chargedCentsRaw =
-                              callData["charged_amount_cents"] ??
-                              endResult["charged_amount_cents"] ??
-                              0;
-
-                          final chargedCents = chargedCentsRaw is int
-                              ? chargedCentsRaw
-                              : int.tryParse(chargedCentsRaw.toString()) ?? 0;
-
-                          callCost = chargedCents.abs() / 100.0;
-
-                          final wallet = endResult["wallet"];
-                          if (wallet != null &&
-                              wallet["balance_cents"] != null) {
-                            final balanceRaw = wallet["balance_cents"];
-                            final balanceCents = balanceRaw is int
-                                ? balanceRaw
-                                : int.tryParse(balanceRaw.toString()) ?? 0;
-
-                            currentBalance = balanceCents / 100.0;
-                          }
-                        }
-
-                        /// Save Recent Call
-                        if (seconds > 0) {
-                          recentCalls.insert(0, {
-                            "name": widget.contactName,
-                            "number": widget.phoneNumber,
-                            "timeAgo": "Just now",
-                            "duration": formatTime(seconds),
-                            "cost": "\$${callCost.toStringAsFixed(2)}",
-                            "date": "Today",
-                            "callTime": TimeOfDay.now().format(context),
-                            "type": "outgoing",
-                          });
-
-                          await saveRecentCalls();
-                        }
-
-                        /// =========================
-                        /// Show Call Summary Popup
-                        /// =========================
-
-                        setState(() {});
-
-                        showDialog(
-                          context: context,
-                          builder: (context) {
-                            return AlertDialog(
-                              backgroundColor: Colors.black,
-
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-
-                              title: const Text(
-                                "Call Summary",
-                                style: TextStyle(color: Colors.white),
-                              ),
-
-                              content: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-
-                                children: [
-                                  Text(
-                                    "Duration: ${formatTime(seconds)}",
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-
-                                  SizedBox(height: 10),
-
-                                  Text(
-                                    "Call Cost: \$${callCost.toStringAsFixed(2)} USD",
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-
-                                  SizedBox(height: 10),
-
-                                  Text(
-                                    "Remaining Balance: \$${currentBalance.toStringAsFixed(2)} USD",
-                                    style: const TextStyle(color: Colors.green),
-                                  ),
-                                ],
-                              ),
-
-                              actions: [
-                                TextButton(
-                                  onPressed: () {
-                                    Navigator.pop(context);
-                                    Navigator.pop(context, true);
-                                  },
-
-                                  child: const Text(
-                                    "OK",
-                                    style: TextStyle(color: Colors.blue),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        );
+                        await endCurrentCall();
                       },
 
                       child: Column(
