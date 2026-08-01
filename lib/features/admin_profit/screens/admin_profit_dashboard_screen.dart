@@ -28,14 +28,14 @@ class _AdminProfitDashboardScreenState
         isLoading = true;
         error = null;
       });
-
       final result = await AdminProfitService.getDashboard();
-
+      if (!mounted) return;
       setState(() {
         data = result;
         isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         error = e.toString();
         isLoading = false;
@@ -43,28 +43,32 @@ class _AdminProfitDashboardScreenState
     }
   }
 
-  String money(dynamic value) {
-    final n = double.tryParse(value.toString()) ?? 0;
-    return '\$${n.toStringAsFixed(2)}';
-  }
+  double _number(dynamic value) =>
+      double.tryParse(value?.toString() ?? '0') ?? 0;
 
-  String ratePerMinute(dynamic value) {
-    final n = double.tryParse(value?.toString() ?? '0') ?? 0;
+  String money(dynamic value) => '\$${_number(value).toStringAsFixed(4)}';
+  String rate(dynamic value) => '\$${_number(value).toStringAsFixed(5)}/min';
+  String percent(dynamic value) => '${_number(value).toStringAsFixed(2)}%';
 
-    return '\$${n.toStringAsFixed(4)}/min';
-  }
-
-  String percent(dynamic value) {
-    final n = double.tryParse(value.toString()) ?? 0;
-    return '${n.toStringAsFixed(2)}%';
+  String dateTime(dynamic value) {
+    if (value == null) return '-';
+    final parsed = DateTime.tryParse(value.toString());
+    if (parsed == null) return value.toString();
+    final local = parsed.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
   }
 
   @override
   Widget build(BuildContext context) {
-    final summary = data?['summary'] ?? {};
-    final today = data?['today'] ?? {};
-    final countryWise = (data?['country_wise'] as List?) ?? [];
-    final userCountryWise = (data?['user_country_wise'] as List?) ?? [];
+    final summary = Map<String, dynamic>.from(data?['summary'] ?? {});
+    final today = Map<String, dynamic>.from(data?['today'] ?? {});
+    final callDetails = (data?['call_details'] as List?) ?? const [];
+    final userSummary = Map<String, dynamic>.from(
+      data?['registered_user_summary'] ?? {},
+    );
+    final users = (data?['registered_users'] as List?) ?? const [];
 
     return Scaffold(
       appBar: AppBar(
@@ -82,160 +86,188 @@ class _AdminProfitDashboardScreenState
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  const Text(
-                    'Today Profit',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('Download PDF'),
-                      onPressed: () async {
-                        await AdminProfitPdfService.downloadTodayProfit(today);
-                      },
+                  _titleWithPdf(
+                    'Today Call Profit',
+                    () => AdminProfitPdfService.downloadProfitSummary(
+                      title: 'Today Call Profit Report',
+                      summary: today,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _summaryGrid(today),
-
+                  _callSummaryGrid(today),
                   const SizedBox(height: 24),
-                  const Text(
-                    'Lifetime Profit',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('Download PDF'),
-                      onPressed: () async {
-                        await AdminProfitPdfService.downloadLifetimeProfit(
-                          summary,
-                        );
-                      },
+                  _titleWithPdf(
+                    'Lifetime Call Profit',
+                    () => AdminProfitPdfService.downloadProfitSummary(
+                      title: 'Lifetime Call Profit Report',
+                      summary: summary,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  _summaryGrid(summary),
-
+                  _callSummaryGrid(summary),
                   const SizedBox(height: 24),
-                  const Text(
-                    'Country Wise Profit Details Summary',
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.picture_as_pdf),
-                      label: const Text('Download PDF'),
-                      onPressed: () async {
-                        await AdminProfitPdfService.downloadCountryWiseDetails(
-                          rows: userCountryWise,
-                          countrySummaryRows: countryWise,
-                        );
-                      },
+                  _titleWithPdf(
+                    'Call Wise Profit Details',
+                    () => AdminProfitPdfService.downloadCallWiseProfitDetails(
+                      rows: callDetails,
+                      summary: summary,
                     ),
                   ),
+                  const SizedBox(height: 10),
+                  _callDetailsTable(callDetails),
+                  const SizedBox(height: 28),
+                  _titleWithPdf(
+                    'Registered Users Summary',
+                    () => AdminProfitPdfService.downloadRegisteredUsersDetails(
+                      rows: users,
+                      summary: userSummary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  _userSummaryGrid(userSummary),
                   const SizedBox(height: 12),
-                  _countryDetailsTable(userCountryWise),
+                  _registeredUsersTable(users),
                 ],
               ),
             ),
     );
   }
 
-  Widget _summaryGrid(Map item) {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 1.65,
-      crossAxisSpacing: 12,
-      mainAxisSpacing: 12,
+  Widget _sectionTitle(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Text(
+      text,
+      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+    ),
+  );
+
+  Widget _titleWithPdf(String title, Future<void> Function() onPdf) => Row(
+    children: [
+      Expanded(child: _sectionTitle(title)),
+      ElevatedButton.icon(
+        onPressed: onPdf,
+        icon: const Icon(Icons.picture_as_pdf),
+        label: const Text('Download PDF'),
+      ),
+    ],
+  );
+
+  Widget _callSummaryGrid(Map<String, dynamic> item) => GridView.count(
+    crossAxisCount: 2,
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    childAspectRatio: 1.65,
+    crossAxisSpacing: 12,
+    mainAxisSpacing: 12,
+    children: [
+      _card('Total Calls', '${item['total_calls'] ?? 0}'),
+      _card('Total Minutes', '${item['total_minutes'] ?? 0} Min'),
+      _card('Average PM Rate', rate(item['avg_sell_rate_usd_per_min'])),
+      _card('Total Charge', money(item['total_charge'])),
+      _card('Provider Cost', money(item['total_provider_cost'])),
+      _card('Net Profit', money(item['total_net_profit'])),
+      _card('Profit %', percent(item['profit_percent'])),
+      _card('Destination Groups', '${item['destination_groups'] ?? 0}'),
+    ],
+  );
+
+  Widget _userSummaryGrid(Map<String, dynamic> item) => GridView.count(
+    crossAxisCount: 2,
+    shrinkWrap: true,
+    physics: const NeverScrollableScrollPhysics(),
+    childAspectRatio: 1.65,
+    crossAxisSpacing: 12,
+    mainAxisSpacing: 12,
+    children: [
+      _card('Registered Numbers', '${item['total_registered_numbers'] ?? 0}'),
+      _card('Countries', '${item['unique_registration_countries'] ?? 0}'),
+      _card('Active', '${item['active_users'] ?? 0}'),
+      _card('Inactive', '${item['inactive_users'] ?? 0}'),
+      _card('Blocked', '${item['blocked_users'] ?? 0}'),
+    ],
+  );
+
+  Widget _card(String title, String value) => Container(
+    padding: const EdgeInsets.all(14),
+    decoration: BoxDecoration(
+      color: const Color.fromARGB(255, 0, 57, 95),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        _card('Total Calls', '${item['total_calls'] ?? 0}'),
-
-        _card('Total Minutes', '${item['total_minutes'] ?? 0}'),
-
-        _card(
-          'Avg Rate / Min',
-          ratePerMinute(item['avg_sell_rate_usd_per_min']),
-        ),
-
-        _card('Revenue', money(item['total_revenue'])),
-
-        _card('Provider Cost', money(item['total_provider_cost'])),
-
-        _card('Net Profit', money(item['total_profit'])),
-
-        _card('Profit %', percent(item['profit_percent'])),
-      ],
-    );
-  }
-
-  Widget _card(String title, String value) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color.fromARGB(255, 0, 57, 95),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(title, style: const TextStyle(color: Colors.white70)),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-            ),
+        Text(title, style: const TextStyle(color: Colors.white70)),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 19,
+            fontWeight: FontWeight.bold,
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
 
-  Widget _countryDetailsTable(List rows) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('No')),
-          DataColumn(label: Text('Country')),
-          DataColumn(label: Text('Registered Number')),
-          DataColumn(label: Text('Calls')),
-          DataColumn(label: Text('Min')),
-          DataColumn(label: Text('Rate / Min')),
-          DataColumn(label: Text('Revenue')),
-          DataColumn(label: Text('Provider Cost')),
-          DataColumn(label: Text('Net Profit')),
-          DataColumn(label: Text('%')),
-        ],
-        rows: rows.map<DataRow>((r) {
-          return DataRow(
-            cells: [
-              DataCell(Text('${r['serial_no'] ?? ''}')),
-              DataCell(Text('${r['country_name'] ?? 'Unknown'}')),
-              DataCell(Text('${r['registered_number'] ?? ''}')),
-              DataCell(Text('${r['total_calls'] ?? 0}')),
-              DataCell(Text('${r['total_minutes'] ?? 0}')),
-              DataCell(Text(ratePerMinute(r['avg_sell_rate_usd_per_min']))),
-              DataCell(Text(money(r['total_user_paid']))),
-              DataCell(Text(money(r['total_provider_cost']))),
-              DataCell(Text(money(r['total_profit']))),
-              DataCell(Text(percent(r['profit_percent']))),
-            ],
-          );
-        }).toList(),
-      ),
-    );
-  }
+  Widget _callDetailsTable(List rows) => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: DataTable(
+      columns: const [
+        DataColumn(label: Text('No')),
+        DataColumn(label: Text('Country')),
+        DataColumn(label: Text('Mobile Number')),
+        DataColumn(label: Text('Date & Time')),
+        DataColumn(label: Text('Min')),
+        DataColumn(label: Text('PM Rate')),
+        DataColumn(label: Text('Total Charge')),
+        DataColumn(label: Text('Provider Cost')),
+        DataColumn(label: Text('Net Profit')),
+        DataColumn(label: Text('Profit %')),
+      ],
+      rows: List.generate(rows.length, (index) {
+        final row = Map<String, dynamic>.from(rows[index] as Map);
+        return DataRow(
+          cells: [
+            DataCell(Text('${index + 1}')),
+            DataCell(Text('${row['country_name'] ?? 'Unknown'}')),
+            DataCell(Text('${row['mobile_number'] ?? ''}')),
+            DataCell(Text(dateTime(row['called_at']))),
+            DataCell(Text('${row['minutes'] ?? 0} Min')),
+            DataCell(Text(rate(row['pm_rate']))),
+            DataCell(Text(money(row['total_charge']))),
+            DataCell(Text(money(row['provider_cost']))),
+            DataCell(Text(money(row['net_profit']))),
+            DataCell(Text(percent(row['profit_percent']))),
+          ],
+        );
+      }),
+    ),
+  );
+
+  Widget _registeredUsersTable(List rows) => SingleChildScrollView(
+    scrollDirection: Axis.horizontal,
+    child: DataTable(
+      columns: const [
+        DataColumn(label: Text('No')),
+        DataColumn(label: Text('Registered Number')),
+        DataColumn(label: Text('Country')),
+        DataColumn(label: Text('Registered Date & Time')),
+        DataColumn(label: Text('Last Login')),
+        DataColumn(label: Text('Status')),
+      ],
+      rows: List.generate(rows.length, (index) {
+        final row = Map<String, dynamic>.from(rows[index] as Map);
+        return DataRow(
+          cells: [
+            DataCell(Text('${index + 1}')),
+            DataCell(Text('${row['registered_number'] ?? ''}')),
+            DataCell(Text('${row['country_name'] ?? 'Unknown'}')),
+            DataCell(Text(dateTime(row['registered_at']))),
+            DataCell(Text(dateTime(row['last_login_at']))),
+            DataCell(Text('${row['activity_status'] ?? 'Inactive'}')),
+          ],
+        );
+      }),
+    ),
+  );
 }
