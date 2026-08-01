@@ -26,6 +26,7 @@ class _WalletScreenState extends State<WalletScreen> {
   String userRole = 'user';
   String displayCurrencyCode = 'USD';
   String userPhoneE164 = '';
+  double currentEstimatedRateUsdPerMinute = 0.0;
 
   @override
   void initState() {
@@ -51,20 +52,51 @@ class _WalletScreenState extends State<WalletScreen> {
   }
 
   Future<void> loadWallet() async {
-    // Backend balance is always USD.
-    // UI converts USD -> local display currency by phone country code.
     await ExchangeRateService.instance.loadRates();
 
-    currentBalance = await fetchWalletBalance();
+    final walletOverview = await fetchWalletOverview();
+
+    currentBalance = walletOverview.balanceUsd;
+
+    currentEstimatedRateUsdPerMinute = walletOverview.estimatedRateUsdPerMinute;
 
     final phone = await StorageService.getPhone();
+
     userPhoneE164 = phone ?? '';
+
     displayCurrencyCode = CountryCurrencyService.currencyFromPhone(
       userPhoneE164,
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
+
     setState(() {});
+  }
+
+  int getRemainingMinutes() {
+    if (currentBalance <= 0) {
+      return 0;
+    }
+
+    if (currentEstimatedRateUsdPerMinute <= 0) {
+      return 0;
+    }
+
+    return (currentBalance / currentEstimatedRateUsdPerMinute).floor();
+  }
+
+  String formatEstimatedRate(double rate) {
+    if (!rate.isFinite || rate <= 0) {
+      return '0.0000';
+    }
+
+    /// Wallet card compact রাখার জন্য 4 decimal।
+    /// Example:
+    /// 0.02513 => 0.0251
+    /// 0.00700 => 0.0070
+    return rate.toStringAsFixed(4);
   }
 
   @override
@@ -116,51 +148,52 @@ class _WalletScreenState extends State<WalletScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
-
                 children: [
-                  /// LEFT SIDE
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-
-                    children: [
-                      Text(
-                        "Current Balance",
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 20.sp,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Current Balance",
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 20.sp,
+                          ),
                         ),
-                      ),
 
-                      SizedBox(height: 12.h),
+                        SizedBox(height: 12.h),
 
-                      Text(
-                        displayText,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 24.sp,
-                          fontWeight: FontWeight.bold,
+                        Text(
+                          displayText,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 24.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
-                      ),
 
-                      SizedBox(height: 8.h),
+                        SizedBox(height: 8.h),
 
-                      Text(
-                        "≈ \$${currentBalance.toStringAsFixed(2)}",
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 15.sp,
+                        Text(
+                          "≈ \$${currentBalance.toStringAsFixed(2)} USD",
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 15.sp,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
 
-                  /// RIGHT SIDE
+                  SizedBox(width: 12.w),
+
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
-
                     children: [
                       Text(
-                        "${getRemainingMinutes()} Min",
+                        currentEstimatedRateUsdPerMinute > 0
+                            ? "${getRemainingMinutes()} Min"
+                            : "-- Min",
                         style: TextStyle(
                           color: Colors.green,
                           fontSize: 20.sp,
@@ -171,12 +204,24 @@ class _WalletScreenState extends State<WalletScreen> {
                       SizedBox(height: 8.h),
 
                       Text(
-                        "Remaining",
+                        "Estimated",
                         style: TextStyle(
                           color: Colors.white54,
                           fontSize: 15.sp,
                         ),
                       ),
+
+                      if (currentEstimatedRateUsdPerMinute > 0) ...[
+                        SizedBox(height: 4.h),
+
+                        Text(
+                          "@ \$${formatEstimatedRate(currentEstimatedRateUsdPerMinute)}/min",
+                          style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 11.sp,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ],

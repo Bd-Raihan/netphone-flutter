@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'package:intl/intl.dart';
 import '../data/wallet_data.dart';
 import '../data/wallet_api_service.dart';
 import '../../../shared/services/storage_service.dart';
@@ -79,8 +79,93 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     );
   }
 
-  String formatUsd(double usdAmount) {
-    return CurrencyFormatter.formatUsd(usdAmount);
+  String formatUsdAmount(double usdAmount, {bool exact = false}) {
+    if (!usdAmount.isFinite) {
+      return r'$0.00';
+    }
+
+    if (exact) {
+      return '\$${usdAmount.abs().toStringAsFixed(4)}';
+    }
+
+    return CurrencyFormatter.formatUsd(usdAmount.abs());
+  }
+
+  String? _readMetaText(Map<String, dynamic>? meta, List<String> keys) {
+    if (meta == null) {
+      return null;
+    }
+
+    for (final key in keys) {
+      final value = meta[key]?.toString().trim();
+
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+
+    return null;
+  }
+
+  String? getTransactionPhone(WalletTransaction tx) {
+    final meta = tx.meta;
+
+    switch (tx.type) {
+      case 'call_charge':
+        return _readMetaText(meta, const [
+          'to_phone_e164',
+          'phone_e164',
+          'destination_phone_e164',
+          'destination_phone',
+          'called_number',
+          'to_phone',
+          'recipient_phone',
+        ]);
+
+      case 'transfer_sent':
+        return _readMetaText(meta, const [
+          'receiver_phone',
+          'to_phone_e164',
+          'recipient_phone',
+        ]);
+
+      case 'transfer_received':
+        return _readMetaText(meta, const ['sender_phone', 'from_phone_e164']);
+
+      default:
+        return _readMetaText(meta, const [
+          'phone_e164',
+          'to_phone_e164',
+          'sender_phone',
+          'receiver_phone',
+        ]);
+    }
+  }
+
+  String formatTransactionDate(String rawValue) {
+    final raw = rawValue.trim();
+
+    if (raw.isEmpty) {
+      return 'Date unavailable';
+    }
+
+    try {
+      final parsed = DateTime.parse(raw).toLocal();
+
+      return DateFormat('dd MMM yyyy • hh:mm a').format(parsed);
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  String _formatDuration(dynamic rawSeconds) {
+    final totalSeconds = int.tryParse(rawSeconds?.toString() ?? '') ?? 0;
+
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -107,9 +192,15 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 final tx = transactions[index];
                 final positive = isPositive(tx.type);
                 final amountDisplay = formatDisplayFromUsd(tx.amount);
-                final amountUsd = formatUsd(tx.amount);
+                final amountUsd = formatUsdAmount(
+                  tx.amount,
+                  exact: tx.type == 'call_charge',
+                );
+
                 final balanceDisplay = formatDisplayFromUsd(tx.balanceAfter);
-                final balanceUsd = formatUsd(tx.balanceAfter);
+                final balanceUsd = formatUsdAmount(tx.balanceAfter);
+                final transactionPhone = getTransactionPhone(tx);
+                final formattedDate = formatTransactionDate(tx.createdAt);
 
                 return Card(
                   color: Colors.grey[900],
@@ -151,26 +242,66 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
 
                         const SizedBox(height: 8),
 
-                        if (tx.meta != null) ...[
-                          if (tx.meta!['phone_e164'] != null)
-                            _infoText('Phone: ${tx.meta!['phone_e164']}'),
-                          if (tx.meta!['sender_phone'] != null)
-                            _infoText('From: ${tx.meta!['sender_phone']}'),
-                          if (tx.meta!['receiver_phone'] != null)
-                            _infoText('To: ${tx.meta!['receiver_phone']}'),
-                          if (tx.meta!['tx_hash'] != null)
-                            _infoText('TXID: ${tx.meta!['tx_hash']}'),
+                        if (transactionPhone != null) ...[
+                          _infoText(
+                            tx.type == 'call_charge'
+                                ? 'Called number: $transactionPhone'
+                                : tx.type == 'transfer_received'
+                                ? 'From: $transactionPhone'
+                                : tx.type == 'transfer_sent'
+                                ? 'To: $transactionPhone'
+                                : 'Phone: $transactionPhone',
+                          ),
                         ],
+
+                        if (tx.meta?['duration_sec'] != null)
+                          _infoText(
+                            'Duration: '
+                            '${_formatDuration(tx.meta!['duration_sec'])}',
+                          ),
+
+                        if (tx.meta?['billable_seconds'] != null)
+                          _infoText(
+                            'Billable time: '
+                            '${_formatDuration(tx.meta!['billable_seconds'])}',
+                          ),
+
+                        if (tx.meta?['tx_hash'] != null)
+                          _infoText('TXID: ${tx.meta!['tx_hash']}'),
 
                         const SizedBox(height: 8),
 
                         Text(
-                          'Balance: $balanceDisplay  ≈ $balanceUsd\n${tx.createdAt}',
+                          'Balance: $balanceDisplay  ≈ $balanceUsd',
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 14,
                             height: 1.35,
                           ),
+                        ),
+
+                        const SizedBox(height: 5),
+
+                        Row(
+                          children: [
+                            const Icon(
+                              Icons.schedule,
+                              color: Colors.white38,
+                              size: 15,
+                            ),
+
+                            const SizedBox(width: 6),
+
+                            Expanded(
+                              child: Text(
+                                formattedDate,
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
 
                         if (displayCurrencyCode != 'USD')

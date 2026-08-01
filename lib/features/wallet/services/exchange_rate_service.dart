@@ -77,14 +77,4 @@ class ExchangeRateService {
   double convertUsdTo(double usdAmount, String currencyCode) {
     return usdAmount * rateFor(currencyCode);
   }
-
-  int usdCentsToMinutes(int balanceCents, {double centsPerMinute = 4.0}) {
-    if (balanceCents <= 0) return 0;
-    return balanceCents ~/ centsPerMinute;
-  }
-
-  int minutesToUsdCents(int minutes, {double centsPerMinute = 4.0}) {
-    if (minutes <= 0) return 0;
-    return (minutes * centsPerMinute).toInt();
-  }
 }

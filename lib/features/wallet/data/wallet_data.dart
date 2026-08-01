@@ -54,40 +54,103 @@ DisplayCurrency getDisplayCurrencyByPhone(String? phone) {
 }
 
 /// =======================================
-/// Minutes Calculation
-/// For now: 1 USD = 25 minutes
-int getRemainingMinutes() {
-  const double perMinuteRateUsd = 0.08; // 1 USD = 12.5 minutes
-  return (currentBalance / perMinuteRateUsd).floor();
-}
-
-/// =======================================
 /// TRANSACTION MODEL
 class WalletTransaction {
   final String type;
+
+  /// Legacy compatibility fields.
   final int amountCents;
   final int balanceAfterCents;
+
+  /// Final exact USD values.
+  final double amountUsd;
+  final double balanceAfterUsd;
+
   final String createdAt;
   final Map<String, dynamic>? meta;
 
-  WalletTransaction({
+  const WalletTransaction({
     required this.type,
     required this.amountCents,
     required this.balanceAfterCents,
+    required this.amountUsd,
+    required this.balanceAfterUsd,
     required this.createdAt,
     this.meta,
   });
 
+  static int _parseInt(dynamic value) {
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static double? _parseDouble(dynamic value) {
+    final parsed = double.tryParse(value?.toString() ?? '');
+
+    if (parsed == null || !parsed.isFinite) {
+      return null;
+    }
+
+    return parsed;
+  }
+
+  static double _resolveUsd({
+    required Map<String, dynamic> json,
+    required String usdKey,
+    required String microUsdKey,
+    required String centsKey,
+  }) {
+    /// 1. Backend direct decimal USD.
+    final directUsd = _parseDouble(json[usdKey]);
+
+    if (directUsd != null) {
+      return directUsd;
+    }
+
+    /// 2. Exact micro-USD.
+    final microUsd = int.tryParse(json[microUsdKey]?.toString() ?? '');
+
+    if (microUsd != null) {
+      return microUsd / 1000000.0;
+    }
+
+    /// 3. Legacy cents fallback.
+    final cents = _parseInt(json[centsKey]);
+
+    return cents / 100.0;
+  }
+
   factory WalletTransaction.fromJson(Map<String, dynamic> json) {
+    final rawMeta = json['meta'];
+
     return WalletTransaction(
-      type: json['type'] ?? '',
-      amountCents: int.parse(json['amount_cents'].toString()),
-      balanceAfterCents: int.parse(json['balance_after_cents'].toString()),
-      createdAt: json['created_at'] ?? '',
-      meta: json['meta'],
+      type: json['type']?.toString() ?? '',
+
+      amountCents: _parseInt(json['amount_cents']),
+
+      balanceAfterCents: _parseInt(json['balance_after_cents']),
+
+      amountUsd: _resolveUsd(
+        json: json,
+        usdKey: 'amount_usd',
+        microUsdKey: 'amount_microusd',
+        centsKey: 'amount_cents',
+      ),
+
+      balanceAfterUsd: _resolveUsd(
+        json: json,
+        usdKey: 'balance_after_usd',
+        microUsdKey: 'balance_after_microusd',
+        centsKey: 'balance_after_cents',
+      ),
+
+      createdAt: json['created_at']?.toString() ?? '',
+
+      meta: rawMeta is Map ? Map<String, dynamic>.from(rawMeta) : null,
     );
   }
 
-  double get amount => amountCents / 100;
-  double get balanceAfter => balanceAfterCents / 100;
+  /// Existing Flutter screens যেন না ভাঙে।
+  double get amount => amountUsd;
+
+  double get balanceAfter => balanceAfterUsd;
 }

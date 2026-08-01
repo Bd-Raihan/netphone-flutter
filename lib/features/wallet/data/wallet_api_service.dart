@@ -4,6 +4,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/config/app_config.dart';
 import 'wallet_data.dart';
 
+class WalletOverview {
+  final double balanceUsd;
+  final double estimatedRateUsdPerMinute;
+
+  const WalletOverview({
+    required this.balanceUsd,
+    required this.estimatedRateUsdPerMinute,
+  });
+}
+
 /// ===============================
 /// GET TOKEN
 /// ===============================
@@ -12,12 +22,16 @@ Future<String?> getToken() async {
   return prefs.getString("access_token");
 }
 
-/// ===============================
-/// FETCH BALANCE
-/// ===============================
-Future<double> fetchWalletBalance() async {
+Future<WalletOverview> fetchWalletOverview() async {
   try {
     final token = await getToken();
+
+    if (token == null || token.trim().isEmpty) {
+      return const WalletOverview(
+        balanceUsd: 0.0,
+        estimatedRateUsdPerMinute: 0.0,
+      );
+    }
 
     final response = await http.get(
       Uri.parse("${AppConfig.baseUrl}/api/wallet/me"),
@@ -27,25 +41,98 @@ Future<double> fetchWalletBalance() async {
       },
     );
 
-    print("BALANCE STATUS: ${response.statusCode}");
-    print("BALANCE BODY: ${response.body}");
+    print(
+      "WALLET OVERVIEW STATUS: "
+      "${response.statusCode}",
+    );
 
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+    print(
+      "WALLET OVERVIEW BODY: "
+      "${response.body}",
+    );
 
-      final balanceCents = int.parse(
-        data["wallet"]["balance_cents"].toString(),
+    if (response.statusCode != 200) {
+      return const WalletOverview(
+        balanceUsd: 0.0,
+        estimatedRateUsdPerMinute: 0.0,
       );
-
-      return balanceCents / 100;
     }
 
-    return 0.000;
+    final dynamic decoded = jsonDecode(response.body);
+
+    if (decoded is! Map) {
+      return const WalletOverview(
+        balanceUsd: 0.0,
+        estimatedRateUsdPerMinute: 0.0,
+      );
+    }
+
+    final data = Map<String, dynamic>.from(decoded);
+
+    final walletRaw = data["wallet"];
+
+    final wallet = walletRaw is Map
+        ? Map<String, dynamic>.from(walletRaw)
+        : <String, dynamic>{};
+
+    final rateRaw = data["estimated_call_rate"];
+
+    final estimatedRate = rateRaw is Map
+        ? Map<String, dynamic>.from(rateRaw)
+        : <String, dynamic>{};
+
+    final balanceUsdDirect = double.tryParse(
+      wallet["balance_usd"]?.toString() ?? "",
+    );
+
+    final balanceMicroUsd = int.tryParse(
+      wallet["balance_microusd"]?.toString() ?? "",
+    );
+
+    final balanceCents =
+        int.tryParse(wallet["balance_cents"]?.toString() ?? "0") ?? 0;
+
+    /// Priority:
+    /// 1. Exact balance_usd
+    /// 2. Exact balance_microusd
+    /// 3. Legacy balance_cents
+    final double resolvedBalanceUsd;
+
+    if (balanceUsdDirect != null && balanceUsdDirect.isFinite) {
+      resolvedBalanceUsd = balanceUsdDirect;
+    } else if (balanceMicroUsd != null) {
+      resolvedBalanceUsd = balanceMicroUsd / 1000000.0;
+    } else {
+      resolvedBalanceUsd = balanceCents / 100.0;
+    }
+
+    final rateUsdPerMinute =
+        double.tryParse(
+          estimatedRate["sell_rate_usd_per_min"]?.toString() ?? "0",
+        ) ??
+        0.0;
+
+    return WalletOverview(
+      balanceUsd: resolvedBalanceUsd,
+      estimatedRateUsdPerMinute: rateUsdPerMinute > 0 ? rateUsdPerMinute : 0.0,
+    );
   } catch (e) {
-    print("BALANCE ERROR:");
-    print(e);
-    return 0.000;
+    print("WALLET OVERVIEW ERROR: $e");
+
+    return const WalletOverview(
+      balanceUsd: 0.0,
+      estimatedRateUsdPerMinute: 0.0,
+    );
   }
+}
+
+/// ===============================
+/// FETCH BALANCE
+/// ===============================
+Future<double> fetchWalletBalance() async {
+  final overview = await fetchWalletOverview();
+
+  return overview.balanceUsd;
 }
 
 /// ===============================
