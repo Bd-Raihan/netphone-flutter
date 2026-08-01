@@ -19,7 +19,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.netphoneapp.call"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -35,7 +35,7 @@ android {
         applicationId = "com.netphoneapp.call"
 
         minSdk = 26
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 36
 
         versionCode = flutter.versionCode
         versionName = flutter.versionName
@@ -60,9 +60,7 @@ android {
     }
 }
 
-dependencies {
-    implementation("com.twilio:voice-android:6.10.3")
-}
+dependencies {  }
 
 flutter {
     source = "../.."

@@ -49,6 +49,7 @@
 
             <service
                 android:name=".CallForegroundService"
+                android:enabled="true"
                 android:exported="false"
                 android:foregroundServiceType="microphone" />
 
