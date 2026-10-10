@@ -445,6 +445,152 @@ class _CallingScreenState extends State<CallingScreen> {
     return amount.abs().toStringAsFixed(4);
   }
 
+  // ============================================================
+  // 🇧🇩 ACTIVE CALL DTMF KEYPAD
+  //
+  // কাজ:
+  // - Hotel / Bank / IVR call-এর সময় 0-9, *, # পাঠানো
+  // - প্রতিটি key সরাসরি Telnyx active call-এ DTMF পাঠাবে
+  // - Calling / Billing / Wallet logic পরিবর্তন করে না
+  // ============================================================
+
+  Future<void> _showDtmfKeypad() async {
+    if (!_voiceService.hasActiveCall) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Keypad is available during an active call.'),
+        ),
+      );
+
+      return;
+    }
+
+    const tones = <String>[
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+      '7',
+      '8',
+      '9',
+      '*',
+      '0',
+      '#',
+    ];
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          top: false,
+          child: Container(
+            padding: EdgeInsets.fromLTRB(24.w, 12.h, 24.w, 24.h),
+            decoration: const BoxDecoration(
+              color: Color(0xFF17181C),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 42.w,
+                  height: 4.h,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+
+                SizedBox(height: 16.h),
+
+                Text(
+                  'Keypad',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20.sp,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
+                SizedBox(height: 4.h),
+
+                Text(
+                  'Tap a number to send DTMF',
+                  style: TextStyle(color: Colors.white54, fontSize: 12.sp),
+                ),
+
+                SizedBox(height: 20.h),
+
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: tones.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    mainAxisSpacing: 14,
+                    crossAxisSpacing: 18,
+                    childAspectRatio: 1.35,
+                  ),
+                  itemBuilder: (context, index) {
+                    final tone = tones[index];
+
+                    return Material(
+                      color: const Color(0xFF292B31),
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () async {
+                          try {
+                            await _voiceService.sendDtmf(tone);
+                          } catch (error) {
+                            if (!mounted) {
+                              return;
+                            }
+
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              SnackBar(content: Text('DTMF failed: $error')),
+                            );
+                          }
+                        },
+                        child: Center(
+                          child: Text(
+                            tone,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24.sp,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
+                SizedBox(height: 14.h),
+
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(sheetContext).pop();
+                  },
+                  child: const Text('Close'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> endCurrentCall() async {
     if (_isEndingCall || _summaryShown) {
       return;
@@ -645,278 +791,284 @@ class _CallingScreenState extends State<CallingScreen> {
       backgroundColor: const Color.fromARGB(255, 0, 0, 0),
 
       body: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12.w),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: 12.w,
+                    vertical: 20.h,
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      /// =====================================
+                      /// Avatar Animation
+                      /// =====================================
+                      TweenAnimationBuilder(
+                        tween: Tween<double>(begin: 0.95, end: 1.05),
+                        duration: const Duration(seconds: 1),
+                        curve: Curves.easeInOut,
+                        builder: (context, double value, child) {
+                          return Transform.scale(
+                            scale: value,
+                            child: Container(
+                              width: 60.w,
+                              height: 60.w,
+                              decoration: BoxDecoration(
+                                color: const Color.fromARGB(26, 161, 207, 250),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.person,
+                                color: const Color.fromARGB(179, 252, 253, 255),
+                                size: 20.sp,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
 
-            child: Column(
-              children: [
-                SizedBox(height: 15.h),
+                      SizedBox(height: 15.h),
 
-                /// =====================================
-                /// Avatar Animation
-                /// =====================================
-                TweenAnimationBuilder(
-                  tween: Tween<double>(begin: 0.95, end: 1.05),
-
-                  duration: const Duration(seconds: 1),
-
-                  curve: Curves.easeInOut,
-
-                  builder: (context, double value, child) {
-                    return Transform.scale(
-                      scale: value,
-
-                      child: Container(
-                        width: 60.w,
-                        height: 60.w,
-
-                        decoration: BoxDecoration(
-                          color: const Color.fromARGB(26, 161, 207, 250),
-                          shape: BoxShape.circle,
+                      /// =====================================
+                      /// Ringing
+                      /// =====================================
+                      if (callStatusText.isNotEmpty) ...[
+                        Text(
+                          callStatusText,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
+                        SizedBox(height: 10.h),
+                      ],
 
-                        child: Icon(
-                          Icons.person,
-                          color: const Color.fromARGB(179, 252, 253, 255),
-                          size: 20.sp,
+                      /// =====================================
+                      /// Name
+                      /// =====================================
+                      Text(
+                        widget.contactName,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 20.sp,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  },
-                ),
 
-                SizedBox(height: 15.h),
+                      SizedBox(height: 10.h),
 
-                /// =====================================
-                /// Ringing
-                /// =====================================
-                if (callStatusText.isNotEmpty) ...[
-                  Text(
-                    callStatusText,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20.sp,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 10.h),
-                ],
+                      /// =====================================
+                      /// Number
+                      /// =====================================
+                      Text(
+                        widget.phoneNumber,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 22.sp,
+                        ),
+                      ),
 
-                SizedBox(height: 10.h),
+                      SizedBox(height: 10.h),
 
-                /// =====================================
-                /// Name
-                /// =====================================
-                Text(
-                  widget.contactName,
+                      /// =====================================
+                      /// Timer
+                      /// =====================================
+                      if (showTimer) ...[
+                        Text(
+                          formatTime(seconds),
+                          style: TextStyle(
+                            color: const Color.fromARGB(255, 0, 102, 255),
+                            fontSize: 20.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 10.h),
+                      ],
 
-                  textAlign: TextAlign.center,
+                      /// =====================================
+                      /// Country
+                      /// =====================================
+                      Text(
+                        currentCountryRate.countryName,
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 16.sp,
+                        ),
+                      ),
 
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20.sp,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                      SizedBox(height: 10.h),
 
-                SizedBox(height: 10.h),
+                      /// =====================================
+                      /// Rate
+                      /// =====================================
+                      Text(
+                        "Per-minute rate: \$${_formatRate(currentRateUsd)}/min",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 15.sp),
+                      ),
 
-                /// =====================================
-                /// Number
-                /// =====================================
-                Text(
-                  widget.phoneNumber,
+                      SizedBox(height: 10.h),
 
-                  style: TextStyle(color: Colors.white70, fontSize: 22.sp),
-                ),
+                      /// =====================================
+                      /// Remaining Balance
+                      /// =====================================
+                      Text(
+                        "Remaining Balance: \$${currentBalance.toStringAsFixed(2)} USD",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white, fontSize: 15.sp),
+                      ),
 
-                SizedBox(height: 10.h),
+                      SizedBox(height: 25.h),
 
-                /// =====================================
-                /// Timer
-                /// =====================================
-                if (showTimer) ...[
-                  Text(
-                    formatTime(seconds),
-                    style: TextStyle(
-                      color: const Color.fromARGB(255, 0, 102, 255),
-                      fontSize: 20.sp,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 10.h),
-                ],
-
-                SizedBox(height: 10.h),
-
-                /// =====================================
-                /// Country
-                /// =====================================
-                Text(
-                  currentCountryRate.countryName,
-
-                  style: TextStyle(color: Colors.white70, fontSize: 16.sp),
-                ),
-
-                SizedBox(height: 10.h),
-
-                /// =====================================
-                /// Rate
-                /// =====================================
-                Text(
-                  "Per-minute rate: \$${_formatRate(currentRateUsd)}/min",
-                  style: TextStyle(color: Colors.white, fontSize: 15.sp),
-                ),
-
-                SizedBox(height: 10.h),
-
-                /// =====================================
-                /// Minutes
-                /// =====================================
-                Text(
-                  "Remaining Balance: \$${currentBalance.toStringAsFixed(2)} USD",
-                  style: TextStyle(color: Colors.white, fontSize: 15.sp),
-                ),
-
-                SizedBox(height: 25.h),
-
-                /// =====================================
-                /// Buttons Row 1
-                /// =====================================
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-
-                  children: [
-                    buildCallButton(
-                      icon: isMuted ? Icons.mic_off : Icons.mic,
-                      label: "Mute",
-
-                      isActive: isMuted,
-
-                      onTap: () async {
-                        final nextMutedState = !isMuted;
-
-                        try {
-                          await _voiceService.setMuted(nextMutedState);
-
-                          if (!mounted) {
-                            return;
-                          }
-
-                          setState(() {
-                            isMuted = nextMutedState;
-                          });
-                        } catch (error) {
-                          if (!mounted) {
-                            return;
-                          }
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Mute failed: $error')),
-                          );
-                        }
-                      },
-                    ),
-
-                    buildCallButton(
-                      icon: isSpeakerOn ? Icons.volume_up : Icons.hearing,
-
-                      label: "Speaker",
-
-                      isActive: isSpeakerOn,
-
-                      onTap: () async {
-                        final nextSpeakerState = !isSpeakerOn;
-
-                        try {
-                          await _voiceService.setSpeakerEnabled(
-                            nextSpeakerState,
-                          );
-
-                          if (!mounted) {
-                            return;
-                          }
-
-                          setState(() {
-                            isSpeakerOn = nextSpeakerState;
-                          });
-                        } catch (error) {
-                          if (!mounted) {
-                            return;
-                          }
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Speaker failed: $error')),
-                          );
-                        }
-                      },
-                    ),
-                  ],
-                ),
-
-                SizedBox(height: 15.h),
-
-                /// =====================================
-                /// Buttons Row 2
-                /// =====================================
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-
-                  children: [
-                    /// End Button
-                    GestureDetector(
-                      onTap: () async {
-                        if (!isValidPhoneNumber(widget.phoneNumber)) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Invalid Country Code or Number'),
-                            ),
-                          );
-                          return;
-                        }
-
-                        await endCurrentCall();
-                      },
-
-                      child: Column(
+                      /// =====================================
+                      /// Buttons Row 1
+                      /// =====================================
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          Container(
-                            width: 60.w,
-                            height: 60.w,
+                          buildCallButton(
+                            icon: isMuted ? Icons.mic_off : Icons.mic,
+                            label: "Mute",
+                            isActive: isMuted,
+                            onTap: () async {
+                              final nextMutedState = !isMuted;
 
-                            decoration: const BoxDecoration(
-                              color: Colors.red,
-                              shape: BoxShape.circle,
-                            ),
+                              try {
+                                await _voiceService.setMuted(nextMutedState);
 
-                            child: Icon(
-                              Icons.call_end,
-                              color: Colors.white,
-                              size: 20.sp,
-                            ),
+                                if (!mounted) {
+                                  return;
+                                }
+
+                                setState(() {
+                                  isMuted = nextMutedState;
+                                });
+                              } catch (error) {
+                                if (!mounted) {
+                                  return;
+                                }
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Mute failed: $error'),
+                                  ),
+                                );
+                              }
+                            },
                           ),
 
-                          SizedBox(height: 10.h),
+                          buildCallButton(
+                            icon: Icons.dialpad,
+                            label: "Keypad",
+                            isActive: false,
+                            onTap: () {
+                              _showDtmfKeypad();
+                            },
+                          ),
 
-                          Text(
-                            "End",
+                          buildCallButton(
+                            icon: isSpeakerOn ? Icons.volume_up : Icons.hearing,
+                            label: "Speaker",
+                            isActive: isSpeakerOn,
+                            onTap: () async {
+                              final nextSpeakerState = !isSpeakerOn;
 
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16.sp,
+                              try {
+                                await _voiceService.setSpeakerEnabled(
+                                  nextSpeakerState,
+                                );
+
+                                if (!mounted) {
+                                  return;
+                                }
+
+                                setState(() {
+                                  isSpeakerOn = nextSpeakerState;
+                                });
+                              } catch (error) {
+                                if (!mounted) {
+                                  return;
+                                }
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Speaker failed: $error'),
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+
+                      SizedBox(height: 15.h),
+
+                      /// =====================================
+                      /// Buttons Row 2
+                      /// =====================================
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          GestureDetector(
+                            onTap: () async {
+                              if (!isValidPhoneNumber(widget.phoneNumber)) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Invalid Country Code or Number',
+                                    ),
+                                  ),
+                                );
+                                return;
+                              }
+
+                              await endCurrentCall();
+                            },
+                            child: Column(
+                              children: [
+                                Container(
+                                  width: 60.w,
+                                  height: 60.w,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.call_end,
+                                    color: Colors.white,
+                                    size: 20.sp,
+                                  ),
+                                ),
+
+                                SizedBox(height: 10.h),
+
+                                Text(
+                                  "End",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16.sp,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
 
-                SizedBox(height: 10.h),
-              ],
-            ),
-          ),
+                      SizedBox(height: 10.h),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

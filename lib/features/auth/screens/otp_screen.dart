@@ -72,9 +72,37 @@ class _OtpScreenState extends State<OtpScreen> {
 
             body: jsonEncode({"phone_e164": widget.phone, "code": otp}),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 22));
 
-      final data = jsonDecode(response.body);
+      Map<String, dynamic> data;
+
+      try {
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is! Map) {
+          throw const FormatException('Invalid server response');
+        }
+
+        data = Map<String, dynamic>.from(decoded);
+      } on FormatException {
+        debugPrint(
+          'Non-JSON OTP verify response: '
+          '${response.statusCode} '
+          '${response.body}',
+        );
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Server is temporarily unavailable. Please try again.',
+            ),
+          ),
+        );
+
+        return;
+      }
 
       debugPrint("OTP RESPONSE => $data");
 
@@ -134,12 +162,15 @@ class _OtpScreenState extends State<OtpScreen> {
         );
       }
     } catch (e) {
+      debugPrint('OTP verification error: $e');
+
       if (!mounted) return;
 
-      /// Network / backend error
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Verification Error: $e")));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to verify OTP right now. Please try again.'),
+        ),
+      );
     } finally {
       if (!mounted) return;
 
@@ -151,87 +182,101 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   @override
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
 
       appBar: AppBar(title: const Text("OTP Verification")),
 
-      body: Padding(
-        padding: const EdgeInsets.all(24),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 48,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        /// =====================================
+                        /// Title
+                        /// =====================================
+                        Text(
+                          "Enter OTP Code",
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.headlineMedium,
+                        ),
 
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(height: 10),
 
-          children: [
-            const SizedBox(height: 30),
+                        /// =====================================
+                        /// Phone Number
+                        /// =====================================
+                        Text(
+                          "Code sent to ${widget.phone}",
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
 
-            /// Title
-            Text(
-              "Enter OTP Code",
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
+                        const SizedBox(height: 30),
 
-            const SizedBox(height: 10),
+                        /// =====================================
+                        /// OTP Input
+                        /// =====================================
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextField(
+                            controller: otpController,
+                            keyboardType: TextInputType.number,
+                            textAlign: TextAlign.center,
+                            decoration: InputDecoration(
+                              hintText: "Enter OTP",
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide.none,
+                              ),
+                            ),
+                          ),
+                        ),
 
-            /// Phone
-            Text(
-              "Code sent to ${widget.phone}",
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
+                        const SizedBox(height: 30),
 
-            const SizedBox(height: 20),
-
-            /// DEV OTP show
-
-            /*
-            Container(
-              padding: const EdgeInsets.all(14),
-
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-              ),
-
-              child: Row(
-                children: [
-                  const Icon(Icons.info),
-                  const SizedBox(width: 10),
-                  Text("DEV OTP: ${widget.devOtp}"),
-                ],
-              ),
-            ),
-            */
-            const SizedBox(height: 30),
-
-            /// OTP Input
-            TextField(
-              controller: otpController,
-              keyboardType: TextInputType.number,
-
-              decoration: InputDecoration(
-                hintText: "Enter OTP",
-                filled: true,
-                fillColor: Colors.white,
-
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none,
+                        /// =====================================
+                        /// Verify Button
+                        /// =====================================
+                        SizedBox(
+                          width: 220,
+                          height: 50,
+                          child: ElevatedButton(
+                            onPressed: isLoading ? null : verifyOtp,
+                            child: isLoading
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text("Verify OTP"),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
-
-            const SizedBox(height: 30),
-
-            /// Verify Button
-            ElevatedButton(
-              onPressed: isLoading ? null : verifyOtp,
-
-              child: isLoading
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text("Verify OTP"),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

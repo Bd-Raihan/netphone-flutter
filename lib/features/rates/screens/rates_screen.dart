@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../models/rate_model.dart';
@@ -14,6 +13,10 @@ class RatesScreen extends StatefulWidget {
 class _RatesScreenState extends State<RatesScreen> {
   late Future<List<RateModel>> ratesFuture;
 
+  final TextEditingController _searchController = TextEditingController();
+
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
@@ -24,6 +27,12 @@ class _RatesScreenState extends State<RatesScreen> {
     setState(() {
       ratesFuture = RatesService.getRates();
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -58,15 +67,115 @@ class _RatesScreenState extends State<RatesScreen> {
 
           final rates = snapshot.data ?? [];
 
+          final query = _searchQuery.trim().toLowerCase();
+
+          final filteredRates = rates.where((rate) {
+            if (query.isEmpty) {
+              return true;
+            }
+
+            final countryName = rate.countryName.toLowerCase();
+
+            final countryCode = rate.countryCode.toLowerCase();
+
+            final prefix = rate.prefix.toLowerCase();
+
+            final normalizedQuery = query.replaceAll('+', '');
+
+            return countryName.contains(query) ||
+                countryCode.contains(query) ||
+                prefix.contains(normalizedQuery);
+          }).toList();
+
           return RefreshIndicator(
             onRefresh: refreshRates,
-            child: ListView.builder(
+            child: ListView(
               padding: EdgeInsets.all(16.w),
-              itemCount: rates.length,
-              itemBuilder: (context, index) {
-                final r = rates[index];
-                return _RateGlassCard(rate: r);
-              },
+              children: [
+                /// =========================================
+                /// Search Box
+                /// =========================================
+                TextField(
+                  controller: _searchController,
+                  onChanged: (value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
+                  decoration: InputDecoration(
+                    hintText: 'Search country, code or prefix',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            onPressed: () {
+                              _searchController.clear();
+
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                            icon: const Icon(Icons.close),
+                          )
+                        : null,
+                    filled: true,
+                    fillColor: const Color(0xFFE8EEF7),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 16.w,
+                      vertical: 14.h,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(16.r),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+
+                SizedBox(height: 16.h),
+
+                /// =========================================
+                /// Search Result Count
+                /// =========================================
+                if (_searchQuery.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: 12.h),
+                    child: Text(
+                      '${filteredRates.length} result(s)',
+                      style: TextStyle(
+                        fontSize: 13.sp,
+                        color: Colors.black54,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+
+                /// =========================================
+                /// Empty Search Result
+                /// =========================================
+                if (filteredRates.isEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: 60.h),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.search_off,
+                          size: 50.sp,
+                          color: Colors.black38,
+                        ),
+                        SizedBox(height: 12.h),
+                        Text(
+                          'No country found',
+                          style: TextStyle(
+                            fontSize: 16.sp,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  ...filteredRates.map((rate) => _RateCard(rate: rate)),
+              ],
             ),
           );
         },
@@ -75,16 +184,16 @@ class _RatesScreenState extends State<RatesScreen> {
   }
 }
 
-class _RateGlassCard extends StatefulWidget {
+class _RateCard extends StatefulWidget {
   final RateModel rate;
 
-  const _RateGlassCard({required this.rate});
+  const _RateCard({required this.rate});
 
   @override
-  State<_RateGlassCard> createState() => _RateGlassCardState();
+  State<_RateCard> createState() => _RateCardState();
 }
 
-class _RateGlassCardState extends State<_RateGlassCard> {
+class _RateCardState extends State<_RateCard> {
   bool pressed = false;
 
   @override
@@ -92,111 +201,115 @@ class _RateGlassCardState extends State<_RateGlassCard> {
     final r = widget.rate;
 
     return GestureDetector(
-      onTapDown: (_) => setState(() => pressed = true),
-      onTapCancel: () => setState(() => pressed = false),
-      onTapUp: (_) => setState(() => pressed = false),
+      onTapDown: (_) {
+        setState(() {
+          pressed = true;
+        });
+      },
+      onTapCancel: () {
+        setState(() {
+          pressed = false;
+        });
+      },
+      onTapUp: (_) {
+        setState(() {
+          pressed = false;
+        });
+      },
       child: AnimatedScale(
-        scale: pressed ? 0.97 : 1.0,
+        scale: pressed ? 0.98 : 1.0,
         duration: const Duration(milliseconds: 120),
         curve: Curves.easeOut,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(26.r),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-            child: Container(
-              margin: EdgeInsets.only(bottom: 14.h),
-              padding: EdgeInsets.all(16.w),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(26.r),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.75)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 18.r,
-                    offset: Offset(0, 8.h),
-                  ),
-                ],
+        child: Container(
+          margin: EdgeInsets.only(bottom: 12.h),
+          padding: EdgeInsets.all(16.w),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF1F4F8),
+            borderRadius: BorderRadius.circular(18.r),
+            border: Border.all(color: const Color(0xFFD6DCE6)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 8.r,
+                offset: Offset(0, 4.h),
               ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 62.w,
-                    height: 62.w,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Color.fromARGB(255, 162, 223, 247),
-                          Color(0xFF74E5FF),
-                        ],
-                      ),
-                      border: Border.all(
-                        color: const Color.fromARGB(
-                          255,
-                          255,
-                          255,
-                          255,
-                        ).withValues(alpha: 0.7),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withValues(alpha: 0.25),
-                          blurRadius: 14.r,
-                          offset: Offset(0, 6.h),
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        r.countryCode,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20.sp,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(width: 14.w),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          r.countryName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 18.sp,
-                            fontWeight: FontWeight.bold,
-                            color: const Color(0xFF151515),
-                          ),
-                        ),
-                        SizedBox(height: 5.h),
-                        Text(
-                          "Prefix: +${r.prefix}",
-                          style: TextStyle(
-                            fontSize: 13.sp,
-                            color: Colors.black45,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text(
-                    "\$${r.sellRateUsdPerMin.toStringAsFixed(3)}/min",
+            ],
+          ),
+          child: Row(
+            children: [
+              /// =================================
+              /// Country Code
+              /// =================================
+              Container(
+                width: 58.w,
+                height: 58.w,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2F6BDE),
+                  borderRadius: BorderRadius.circular(16.r),
+                ),
+                child: Center(
+                  child: Text(
+                    r.countryCode,
                     style: TextStyle(
-                      fontSize: 16.sp,
+                      color: Colors.white,
+                      fontSize: 18.sp,
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xFF25A94F),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
+
+              SizedBox(width: 14.w),
+
+              /// =================================
+              /// Country + Prefix
+              /// =================================
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      r.countryName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17.sp,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xFF171717),
+                      ),
+                    ),
+
+                    SizedBox(height: 5.h),
+
+                    Text(
+                      'Prefix: +${r.prefix}',
+                      style: TextStyle(fontSize: 13.sp, color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+
+              SizedBox(width: 10.w),
+
+              /// =================================
+              /// Per-Minute Rate
+              /// =================================
+              Container(
+                padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 8.h),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCE8FF),
+                  borderRadius: BorderRadius.circular(12.r),
+                ),
+                child: Text(
+                  '\$${r.sellRateUsdPerMin.toStringAsFixed(3)}/min',
+                  style: TextStyle(
+                    fontSize: 14.sp,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF174FAF),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),

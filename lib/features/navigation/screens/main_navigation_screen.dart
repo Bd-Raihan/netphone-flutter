@@ -25,7 +25,12 @@ import '../../settings/screens/settings_screen.dart';
 import '../../admin_profit/screens/admin_profit_dashboard_screen.dart';
 import '../../app_pages/screens/app_page_screen.dart';
 import '../../rates/screens/rates_screen.dart';
+import '../../fax/screens/fax_home_screen.dart';
+import '../../admin_sms_inbox/screens/admin_sms_inbox_screen.dart';
 import '../../admin_rate_management/screens/admin_rate_management_screen.dart';
+import '../../admin_call_activity/screens/admin_call_activity_screen.dart';
+import '../../app_update/services/app_update_service.dart';
+import '../../app_update/dialogs/app_update_dialog.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -34,9 +39,11 @@ class MainNavigationScreen extends StatefulWidget {
   State<MainNavigationScreen> createState() => _MainNavigationScreenState();
 }
 
-class _MainNavigationScreenState extends State<MainNavigationScreen> {
+class _MainNavigationScreenState extends State<MainNavigationScreen>
+    with WidgetsBindingObserver {
   int currentIndex = 0;
-
+  bool _isCheckingAppUpdate = false;
+  bool _isUpdateDialogOpen = false;
   String userPhone = "";
   String userRole = "user";
 
@@ -65,8 +72,31 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   @override
   void initState() {
     super.initState();
+
+    WidgetsBinding.instance.addObserver(this);
+
     loadWallet();
     loadUserInfo();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      checkAppUpdate();
+    });
+  }
+
+  // ============================================================
+  // 🇧🇩 APP RESUME UPDATE CHECK
+  //
+  // User যতক্ষণ নতুন version install না করবে,
+  // app আবার foreground/open হলে update check হবে.
+  // ============================================================
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        checkAppUpdate();
+      });
+    }
   }
 
   Future<void> loadWallet() async {
@@ -86,6 +116,39 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     });
   }
 
+  // ============================================================
+  // 🇧🇩 NETPHONE APP UPDATE CHECK
+  //
+  // কাজ:
+  // - Backend থেকে latest version check করা
+  // - Update থাকলে dialog দেখানো
+  // ============================================================
+
+  Future<void> checkAppUpdate() async {
+    if (_isCheckingAppUpdate || _isUpdateDialogOpen) {
+      return;
+    }
+
+    _isCheckingAppUpdate = true;
+
+    try {
+      final result = await AppUpdateService.checkForUpdate();
+
+      if (!mounted || result == null) {
+        return;
+      }
+
+      _isUpdateDialogOpen = true;
+
+      await showNetPhoneUpdateDialog(context, result);
+    } catch (e) {
+      debugPrint('App update check failed: $e');
+    } finally {
+      _isCheckingAppUpdate = false;
+      _isUpdateDialogOpen = false;
+    }
+  }
+
   void openAppPage({
     required BuildContext context,
     required String slug,
@@ -97,6 +160,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         builder: (_) => AppPageScreen(slug: slug, fallbackTitle: title),
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
   }
 
   @override
@@ -138,7 +207,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   Share.share(
                     "Download NetPhone App\n\n"
                     "Cheap Rates International Calls 🌍\n"
-                    "https://play.google.com/store/apps/details?id=com.netphone.call",
+                    "https://play.google.com/store/apps/details?id=com.netphoneapp.call",
                   );
                 },
                 icon: Icon(Icons.share, color: Colors.white, size: 22.sp),
@@ -169,9 +238,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "NetPhone",
+                      "NetPhoneApp",
                       style: TextStyle(
-                        color: Colors.white,
+                        color: const Color.fromARGB(255, 154, 255, 253),
                         fontSize: 28.sp,
                         fontWeight: FontWeight.bold,
                       ),
@@ -182,10 +251,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                       style: TextStyle(
                         color: const Color.fromARGB(
                           255,
-                          231,
-                          226,
-                          226,
-                        ).withValues(alpha: 0.25),
+                          222,
+                          138,
+                          248,
+                        ).withValues(alpha: 0.95),
                         fontSize: 15.sp,
                       ),
                     ),
@@ -198,9 +267,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                       decoration: BoxDecoration(
                         color: const Color.fromARGB(
                           255,
-                          231,
-                          226,
-                          226,
+                          222,
+                          138,
+                          248,
                         ).withValues(alpha: 0.25),
                         borderRadius: BorderRadius.circular(20.r),
                       ),
@@ -251,6 +320,21 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         },
                       ),
 
+                    if (isAdmin)
+                      buildDrawerItem(
+                        context: context,
+                        icon: Icons.manage_history,
+                        title: "Call Activity / CDR",
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminCallActivityScreen(),
+                            ),
+                          );
+                        },
+                      ),
+
                     buildDrawerItem(
                       context: context,
                       icon: Icons.rate_review,
@@ -264,6 +348,35 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         );
                       },
                     ),
+
+                    buildDrawerItem(
+                      context: context,
+                      icon: Icons.fax,
+                      title: "Fax",
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const FaxHomeScreen(),
+                          ),
+                        );
+                      },
+                    ),
+
+                    if (isAdmin)
+                      buildDrawerItem(
+                        context: context,
+                        icon: Icons.sms_outlined,
+                        title: "SMS Inbox",
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AdminSmsInboxScreen(),
+                            ),
+                          );
+                        },
+                      ),
 
                     if (isAdmin)
                       buildDrawerItem(
@@ -368,7 +481,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                         Share.share(
                           "Download NetPhone App\n\n"
                           "Cheap Rates International Calls 🌍\n"
-                          "https://play.google.com/store/apps/details?id=com.netphone.call",
+                          "https://play.google.com/store/apps/details?id=com.netphoneapp.call",
                         );
                       },
                     ),
@@ -388,8 +501,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         ),
         child: BottomNavigationBar(
           currentIndex: currentIndex,
-          onTap: (index) async {
-            await loadWallet();
+          onTap: (index) {
+            if (index == currentIndex) {
+              return;
+            }
+
             setState(() {
               currentIndex = index;
             });

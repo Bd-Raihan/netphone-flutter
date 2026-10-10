@@ -23,57 +23,69 @@ Future<String?> getToken() async {
 }
 
 Future<WalletOverview> fetchWalletOverview() async {
+  final token = await getToken();
+
+  if (token == null || token.trim().isEmpty) {
+    throw Exception("Wallet authentication token missing");
+  }
+
   try {
-    final token = await getToken();
-
-    if (token == null || token.trim().isEmpty) {
-      return const WalletOverview(
-        balanceUsd: 0.0,
-        estimatedRateUsdPerMinute: 0.0,
-      );
-    }
-
-    final response = await http.get(
-      Uri.parse("${AppConfig.baseUrl}/api/wallet/me"),
-      headers: {
-        "Authorization": "Bearer $token",
-        "Content-Type": "application/json",
-      },
-    );
+    final response = await http
+        .get(
+          Uri.parse("${AppConfig.baseUrl}/api/wallet/me"),
+          headers: {
+            "Authorization": "Bearer $token",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+        )
+        .timeout(const Duration(seconds: 15));
 
     print(
       "WALLET OVERVIEW STATUS: "
       "${response.statusCode}",
     );
 
-    print(
-      "WALLET OVERVIEW BODY: "
-      "${response.body}",
-    );
-
     if (response.statusCode != 200) {
-      return const WalletOverview(
-        balanceUsd: 0.0,
-        estimatedRateUsdPerMinute: 0.0,
+      throw Exception(
+        "Wallet API failed with status "
+        "${response.statusCode}",
       );
     }
 
-    final dynamic decoded = jsonDecode(response.body);
+    dynamic decoded;
+
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      throw Exception("Wallet API returned invalid JSON");
+    }
 
     if (decoded is! Map) {
-      return const WalletOverview(
-        balanceUsd: 0.0,
-        estimatedRateUsdPerMinute: 0.0,
-      );
+      throw Exception("Wallet API response format invalid");
     }
 
     final data = Map<String, dynamic>.from(decoded);
 
     final walletRaw = data["wallet"];
 
-    final wallet = walletRaw is Map
-        ? Map<String, dynamic>.from(walletRaw)
-        : <String, dynamic>{};
+    if (walletRaw is! Map) {
+      throw Exception("Wallet data missing from server");
+    }
+
+    final wallet = Map<String, dynamic>.from(walletRaw);
+
+    // গুরুত্বপূর্ণ:
+    // Server যদি সত্যিকারের wallet balance field-ই না পাঠায়,
+    // তখন 0 balance ধরে নেওয়া যাবে না।
+    final hasBalanceField =
+        wallet.containsKey("balance_usd") ||
+        wallet.containsKey("balance_microusd") ||
+        wallet.containsKey("balance_cents");
+
+    if (!hasBalanceField) {
+      throw Exception("Wallet balance field missing");
+    }
 
     final rateRaw = data["estimated_call_rate"];
 
@@ -89,21 +101,20 @@ Future<WalletOverview> fetchWalletOverview() async {
       wallet["balance_microusd"]?.toString() ?? "",
     );
 
-    final balanceCents =
-        int.tryParse(wallet["balance_cents"]?.toString() ?? "0") ?? 0;
+    final balanceCents = int.tryParse(
+      wallet["balance_cents"]?.toString() ?? "",
+    );
 
-    /// Priority:
-    /// 1. Exact balance_usd
-    /// 2. Exact balance_microusd
-    /// 3. Legacy balance_cents
     final double resolvedBalanceUsd;
 
     if (balanceUsdDirect != null && balanceUsdDirect.isFinite) {
       resolvedBalanceUsd = balanceUsdDirect;
     } else if (balanceMicroUsd != null) {
       resolvedBalanceUsd = balanceMicroUsd / 1000000.0;
-    } else {
+    } else if (balanceCents != null) {
       resolvedBalanceUsd = balanceCents / 100.0;
+    } else {
+      throw Exception("Wallet balance could not be parsed");
     }
 
     final rateUsdPerMinute =
@@ -114,15 +125,16 @@ Future<WalletOverview> fetchWalletOverview() async {
 
     return WalletOverview(
       balanceUsd: resolvedBalanceUsd,
+
       estimatedRateUsdPerMinute: rateUsdPerMinute > 0 ? rateUsdPerMinute : 0.0,
     );
   } catch (e) {
     print("WALLET OVERVIEW ERROR: $e");
 
-    return const WalletOverview(
-      balanceUsd: 0.0,
-      estimatedRateUsdPerMinute: 0.0,
-    );
+    // IMPORTANT:
+    // এখানে আর fake 0 balance return করব না।
+    // Error caller-এর কাছে যাবে।
+    rethrow;
   }
 }
 
@@ -130,9 +142,17 @@ Future<WalletOverview> fetchWalletOverview() async {
 /// FETCH BALANCE
 /// ===============================
 Future<double> fetchWalletBalance() async {
-  final overview = await fetchWalletOverview();
+  try {
+    final overview = await fetchWalletOverview();
 
-  return overview.balanceUsd;
+    return overview.balanceUsd;
+  } catch (e) {
+    print("FETCH WALLET BALANCE ERROR: $e");
+
+    // Existing valid global balance রাখবে।
+    // Temporary API failure-এ 0 করবে না।
+    return currentBalance;
+  }
 }
 
 /// ===============================

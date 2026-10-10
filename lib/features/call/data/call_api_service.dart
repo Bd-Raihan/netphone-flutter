@@ -9,7 +9,6 @@ import 'package:http/http.dart' as http;
 /// 2. Request a short-lived Telnyx WebRTC JWT.
 /// 3. End the backend call session.
 /// 4. Read the latest backend call status.
-///
 /// This service does not control microphone or WebRTC audio.
 /// TelnyxVoiceService will handle the real-time call media.
 class CallApiService {

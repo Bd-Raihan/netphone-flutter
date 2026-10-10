@@ -3,7 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../shared/services/storage_service.dart';
 import '../../admin_content/screens/admin_content_list_screen.dart';
-import '../../app_pages/screens/app_page_screen.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../auth/screens/login_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -18,6 +18,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String selectedLanguage = 'English';
   String userRole = 'user';
   bool isLoadingRole = true;
+  String appVersion = '';
 
   bool get isAdmin => userRole.toLowerCase() == 'admin';
 
@@ -25,6 +26,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _loadUserRole();
+    _loadAppVersion();
   }
 
   Future<void> _loadUserRole() async {
@@ -38,13 +40,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  void _openAppPage({required String slug, required String title}) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AppPageScreen(slug: slug, fallbackTitle: title),
-      ),
-    );
+  Future<void> _loadAppVersion() async {
+    final packageInfo = await PackageInfo.fromPlatform();
+
+    if (!mounted) return;
+
+    setState(() {
+      appVersion = packageInfo.version;
+    });
   }
 
   Future<void> _logout() async {
@@ -273,52 +276,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onTap: _showLanguageDialog,
                   ),
 
-                  _sectionLabel('Legal & Support'),
-
-                  _settingTile(
-                    icon: Icons.privacy_tip,
-                    title: 'Privacy Policy',
-                    onTap: () {
-                      _openAppPage(
-                        slug: 'privacy_policy',
-                        title: 'Privacy Policy',
-                      );
-                    },
-                  ),
-
-                  _settingTile(
-                    icon: Icons.description,
-                    title: 'Terms & Conditions',
-                    onTap: () {
-                      _openAppPage(
-                        slug: 'terms_conditions',
-                        title: 'Terms & Conditions',
-                      );
-                    },
-                  ),
-
-                  _settingTile(
-                    icon: Icons.assignment_return,
-                    title: 'Refund & Return',
-                    onTap: () {
-                      _openAppPage(
-                        slug: 'refund_return',
-                        title: 'Refund & Return',
-                      );
-                    },
-                  ),
-
-                  _settingTile(
-                    icon: Icons.contact_support,
-                    title: 'Customer Support',
-                    onTap: () {
-                      _openAppPage(
-                        slug: 'customer_support',
-                        title: 'Customer Support',
-                      );
-                    },
-                  ),
-
                   _sectionLabel('Account'),
 
                   _settingTile(
@@ -350,7 +307,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   SizedBox(height: 4.h),
 
                   Text(
-                    'Version 1.0.0',
+                    appVersion.isEmpty ? 'Version' : 'Version $appVersion',
                     style: TextStyle(color: Colors.white38, fontSize: 12.sp),
                   ),
                 ],

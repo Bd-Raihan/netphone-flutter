@@ -65,10 +65,6 @@ class _AdminProfitDashboardScreenState
     final summary = Map<String, dynamic>.from(data?['summary'] ?? {});
     final today = Map<String, dynamic>.from(data?['today'] ?? {});
     final callDetails = (data?['call_details'] as List?) ?? const [];
-    final userSummary = Map<String, dynamic>.from(
-      data?['registered_user_summary'] ?? {},
-    );
-    final users = (data?['registered_users'] as List?) ?? const [];
 
     return Scaffold(
       appBar: AppBar(
@@ -113,18 +109,6 @@ class _AdminProfitDashboardScreenState
                   ),
                   const SizedBox(height: 10),
                   _callDetailsTable(callDetails),
-                  const SizedBox(height: 28),
-                  _titleWithPdf(
-                    'Registered Users Summary',
-                    () => AdminProfitPdfService.downloadRegisteredUsersDetails(
-                      rows: users,
-                      summary: userSummary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  _userSummaryGrid(userSummary),
-                  const SizedBox(height: 12),
-                  _registeredUsersTable(users),
                 ],
               ),
             ),
@@ -166,22 +150,6 @@ class _AdminProfitDashboardScreenState
       _card('Net Profit', money(item['total_net_profit'])),
       _card('Profit %', percent(item['profit_percent'])),
       _card('Destination Groups', '${item['destination_groups'] ?? 0}'),
-    ],
-  );
-
-  Widget _userSummaryGrid(Map<String, dynamic> item) => GridView.count(
-    crossAxisCount: 2,
-    shrinkWrap: true,
-    physics: const NeverScrollableScrollPhysics(),
-    childAspectRatio: 1.65,
-    crossAxisSpacing: 12,
-    mainAxisSpacing: 12,
-    children: [
-      _card('Registered Numbers', '${item['total_registered_numbers'] ?? 0}'),
-      _card('Countries', '${item['unique_registration_countries'] ?? 0}'),
-      _card('Active', '${item['active_users'] ?? 0}'),
-      _card('Inactive', '${item['inactive_users'] ?? 0}'),
-      _card('Blocked', '${item['blocked_users'] ?? 0}'),
     ],
   );
 
@@ -238,33 +206,6 @@ class _AdminProfitDashboardScreenState
             DataCell(Text(money(row['provider_cost']))),
             DataCell(Text(money(row['net_profit']))),
             DataCell(Text(percent(row['profit_percent']))),
-          ],
-        );
-      }),
-    ),
-  );
-
-  Widget _registeredUsersTable(List rows) => SingleChildScrollView(
-    scrollDirection: Axis.horizontal,
-    child: DataTable(
-      columns: const [
-        DataColumn(label: Text('No')),
-        DataColumn(label: Text('Registered Number')),
-        DataColumn(label: Text('Country')),
-        DataColumn(label: Text('Registered Date & Time')),
-        DataColumn(label: Text('Last Login')),
-        DataColumn(label: Text('Status')),
-      ],
-      rows: List.generate(rows.length, (index) {
-        final row = Map<String, dynamic>.from(rows[index] as Map);
-        return DataRow(
-          cells: [
-            DataCell(Text('${index + 1}')),
-            DataCell(Text('${row['registered_number'] ?? ''}')),
-            DataCell(Text('${row['country_name'] ?? 'Unknown'}')),
-            DataCell(Text(dateTime(row['registered_at']))),
-            DataCell(Text(dateTime(row['last_login_at']))),
-            DataCell(Text('${row['activity_status'] ?? 'Inactive'}')),
           ],
         );
       }),

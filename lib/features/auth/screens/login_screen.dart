@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../../../core/config/app_config.dart';
 import 'otp_screen.dart';
+import 'review/review_login_screen.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -50,9 +51,37 @@ class _LoginScreenState extends State<LoginScreen> {
             headers: {"Content-Type": "application/json"},
             body: jsonEncode({"phone_e164": phone}),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 22));
 
-      final data = jsonDecode(response.body);
+      Map<String, dynamic> data;
+
+      try {
+        final decoded = jsonDecode(response.body);
+
+        if (decoded is! Map) {
+          throw const FormatException('Invalid server response');
+        }
+
+        data = Map<String, dynamic>.from(decoded);
+      } on FormatException {
+        debugPrint(
+          'Non-JSON OTP response: '
+          '${response.statusCode} '
+          '${response.body}',
+        );
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Server is temporarily unavailable. Please try again.',
+            ),
+          ),
+        );
+
+        return;
+      }
 
       if (response.statusCode == 200 && data["ok"] == true) {
         if (!mounted) return;
@@ -152,6 +181,20 @@ class _LoginScreenState extends State<LoginScreen> {
                               style: TextStyle(fontSize: 16),
                             ),
                     ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  TextButton(
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ReviewLoginScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text("Google Play Review Access"),
                   ),
 
                   const SizedBox(height: 100),
