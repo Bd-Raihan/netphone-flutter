@@ -5,9 +5,77 @@ class FaxStatusChip extends StatelessWidget {
 
   const FaxStatusChip({super.key, required this.status});
 
+  static String normalize(String value) =>
+      value.trim().toLowerCase().replaceAll('.', '_');
+
+  static bool isSuccessful(String value) =>
+      normalize(value) == 'delivered' || normalize(value) == 'received';
+
+  static bool isPending(String value) => const {
+    'queued',
+    'media_processed',
+    'originated',
+    'sending',
+    'sending_started',
+    'initiated',
+    'receiving',
+    'receiving_started',
+    'media_processing',
+    'media_processing_started',
+  }.contains(normalize(value));
+
+  static String failureMessage(String? reason) {
+    switch (reason?.trim().toLowerCase()) {
+      case 'destination_invalid':
+      case 'receiver_invalid_number_format':
+        return 'Invalid fax number.';
+      case 'receiver_unallocated_number':
+        return 'Fax number is not in service.';
+      case 'destination_unreachable':
+        return 'Receiver is unreachable.';
+      case 'receiver_no_answer':
+        return 'Receiver did not answer.';
+      case 'receiver_no_response':
+        return 'No response from the receiver.';
+      case 'user_busy':
+        return 'Receiver is busy.';
+      case 'receiver_decline':
+        return 'Receiver declined the fax.';
+      case 'receiver_incompatible_destination':
+        return 'Receiver is incompatible with this fax.';
+      case 'fax_initial_communication_timeout':
+        return 'Timed out waiting for a fax response.';
+      case 'receiver_recovery_on_timer_expire':
+        return 'Receiver connection timed out.';
+      case 'receiver_call_dropped':
+      case 'sender_call_dropped':
+      case 'carrier_lost':
+        return 'Fax connection was interrupted.';
+      case 'receiver_communication_error':
+      case 'sender_communication_error':
+      case 'fax_signaling_error':
+      case 'invalid_ecm_response_from_receiver':
+        return 'Fax communication failed.';
+      case 'sender_canceled':
+        return 'Sender canceled the fax.';
+      case 'file_download_failed':
+      case 'file_format_invalid':
+        return 'Unable to prepare the fax document.';
+      case 'file_size_limit_exceeded':
+      case 'page_count_limit_exceeded':
+        return 'Fax document exceeds the allowed limit.';
+      case 'destination_not_in_countries_whitelist':
+      case 'destination_not_in_service_plan':
+      case 'unverified_destination_not_allowed':
+        return 'Sending to this destination is unavailable.';
+      default:
+        return 'Fax delivery failed. Please try again later.';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final normalized = status.toLowerCase().trim();
+    final normalized = normalize(status);
 
     IconData icon;
     Color color;
@@ -15,9 +83,10 @@ class FaxStatusChip extends StatelessWidget {
 
     switch (normalized) {
       case 'delivered':
+      case 'received':
         icon = Icons.check_circle;
         color = Colors.green;
-        label = 'Delivered';
+        label = 'Successful';
         break;
 
       case 'failed':
@@ -27,15 +96,32 @@ class FaxStatusChip extends StatelessWidget {
         break;
 
       case 'sending':
+      case 'sending_started':
         icon = Icons.send;
-        color = Colors.blue;
+        color = Colors.orange;
         label = 'Sending';
         break;
 
       case 'media_processed':
+      case 'media_processing':
+      case 'media_processing_started':
         icon = Icons.description;
-        color = Colors.indigo;
+        color = Colors.orange;
         label = 'Processing';
+        break;
+
+      case 'originated':
+        icon = Icons.phone_in_talk;
+        color = Colors.orange;
+        label = 'Connecting';
+        break;
+
+      case 'initiated':
+      case 'receiving':
+      case 'receiving_started':
+        icon = Icons.call_received;
+        color = Colors.orange;
+        label = 'Receiving';
         break;
 
       case 'queued':
@@ -47,7 +133,7 @@ class FaxStatusChip extends StatelessWidget {
       default:
         icon = Icons.info_outline;
         color = Colors.grey;
-        label = status.isEmpty ? 'Unknown' : status;
+        label = 'Unknown';
     }
 
     return Container(

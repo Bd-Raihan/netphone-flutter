@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'fax_history_screen.dart';
 import 'fax_notifications_screen.dart';
 import 'send_fax_screen.dart';
+import 'fax_receive_screen.dart';
 
 class FaxHomeScreen extends StatelessWidget {
   const FaxHomeScreen({super.key});
@@ -74,6 +75,15 @@ class FaxHomeScreen extends StatelessWidget {
 
             const SizedBox(height: 12),
 
+            _FaxMenuCard(
+              icon: Icons.call_received,
+              title: 'Receive Fax',
+              subtitle: 'Your fax number and Receive ID',
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const FaxReceiveScreen(),
+              )),
+            ),
+            const SizedBox(height: 12),
             _FaxMenuCard(
               icon: Icons.history,
               title: 'Fax History',

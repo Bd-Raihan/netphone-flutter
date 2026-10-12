@@ -4,6 +4,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/fax_api_service.dart';
+import '../services/fax_platform_api.dart';
+import '../widgets/fax_status_chip.dart';
+import 'fax_history_screen.dart';
 
 class SendFaxScreen extends StatefulWidget {
   const SendFaxScreen({super.key});
@@ -24,6 +27,10 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
   String? _selectedFileName;
 
   bool _sending = false;
+  int? _uploadedId;
+  Map<String, dynamic>? _quote;
+  String? _quotedNumber;
+  bool _submissionAttempted = false;
 
   @override
   void dispose() {
@@ -54,6 +61,10 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
       setState(() {
         _selectedFile = File(selected.path!);
         _selectedFileName = selected.name;
+        _uploadedId = null;
+        _quote = null;
+        _quotedNumber = null;
+        _submissionAttempted = false;
       });
     } catch (e) {
       _showMessage('Unable to select document.');
@@ -76,11 +87,52 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
       _sending = true;
     });
 
+    bool submissionStarted = false;
     try {
-      final uploadId = await FaxApiService.uploadDocument(_selectedFile!);
+      _uploadedId ??= await FaxApiService.uploadDocument(_selectedFile!);
+      final uploadId = _uploadedId!;
+
+      if (!mounted) return;
+      final number = _toController.text.trim();
+      if (_submissionAttempted && _quotedNumber != number) {
+        _showMessage('Check Fax History before changing this fax submission.');
+        return;
+      }
+      final expired = DateTime.tryParse(_quote?['expires_at']?.toString() ?? '')
+          ?.isBefore(DateTime.now()) ?? false;
+      if (_quote == null || (!_submissionAttempted && (expired || _quotedNumber != number))) {
+        _quote = await FaxPlatformApi.request('/quote', method: 'POST', body: {
+          'upload_id': uploadId,
+          'to_number': number,
+        });
+        _quotedNumber = number;
+      }
+      final quote = _quote!;
+      if (!mounted) return;
+      if (quote['billing_enabled'] == true) {
+        final fee = double.parse(quote['amount_usd'].toString());
+        final available = double.parse(quote['balance_usd'].toString());
+        if (available < fee) {
+          _showMessage('Insufficient balance. Recharge your wallet before sending.');
+          return;
+        }
+      }
+      final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Confirm Fax'),
+        content: Text('To: ${_toController.text.trim()}\n'
+          '${quote['pages'] == null ? '' : 'Pages: ${quote['pages']}\n'}'
+          'Fee: ${FaxPlatformApi.usd(quote['amount_usd'])}\n\n'
+          'The fee is charged before sending. If the fax fails, the prepaid fax fee is refunded.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm & Send'))],
+      ));
+      if (confirmed != true || !mounted) return;
+      submissionStarted = true;
+      _submissionAttempted = true;
 
       final fax = await FaxApiService.sendFax(
         uploadId: uploadId,
+        quoteId: quote['quote_id']?.toString(),
         toNumber: _toController.text,
         senderName: _senderController.text,
         userEmail: _emailController.text,
@@ -89,15 +141,63 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
 
       if (!mounted) return;
 
-      _showMessage('Fax submitted successfully. Status: ${fax.status}');
+      if (FaxStatusChip.isSuccessful(fax.status)) {
+        _showMessage(
+          'Successful — fax delivered.',
+          backgroundColor: Colors.green.shade700,
+        );
+      } else if (FaxStatusChip.normalize(fax.status) == 'failed') {
+        _showMessage(
+          'Failed — ${FaxStatusChip.failureMessage(fax.failureReason)}',
+          backgroundColor: Colors.red.shade700,
+        );
+      } else {
+        _showMessage(
+          'Delivery pending. Open Fax History for the final result.',
+          backgroundColor: Colors.orange.shade800,
+        );
+      }
 
       Navigator.pop(context, true);
     } on FaxApiException catch (e) {
       if (!mounted) return;
-      _showMessage(e.message);
+      if (e.statusCode != null && e.statusCode! < 500) {
+        _submissionAttempted = false;
+        if (e.statusCode == 409) _quote = null;
+      }
+      final unconfirmed =
+          submissionStarted && (e.statusCode == null || e.statusCode! >= 500);
+      _showMessage(
+        unconfirmed
+            ? 'Submission not confirmed. Check Fax History before trying again.'
+            : 'Not sent — ${e.message}',
+        backgroundColor: unconfirmed
+            ? Colors.orange.shade800
+            : Colors.red.shade700,
+        showHistoryAction: unconfirmed,
+      );
+    } on SocketException catch (_) {
+      if (!mounted) return;
+      _showMessage(
+        submissionStarted
+            ? 'Connection lost. Check Fax History before trying again.'
+            : 'Not sent — connection unavailable. Please reconnect.',
+        backgroundColor: submissionStarted
+            ? Colors.orange.shade800
+            : Colors.red.shade700,
+        showHistoryAction: submissionStarted,
+      );
     } catch (e) {
       if (!mounted) return;
-      _showMessage('Unable to send fax.');
+      _showMessage(
+        submissionStarted
+            ? 'Submission not confirmed. Check Fax History before trying again.'
+            : 'Not sent — unable to submit the fax document.',
+        backgroundColor: submissionStarted
+            ? Colors.orange.shade800
+            : Colors.red.shade700,
+        showHistoryAction: submissionStarted,
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -107,12 +207,32 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
     }
   }
 
-  void _showMessage(String message) {
+  void _showMessage(
+    String message, {
+    Color? backgroundColor,
+    bool showHistoryAction = false,
+  }) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: backgroundColor,
+        action: showHistoryAction
+            ? SnackBarAction(
+                label: 'History',
+                textColor: Colors.white,
+                onPressed: () {
+                  if (!mounted) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const FaxHistoryScreen()),
+                  );
+                },
+              )
+            : null,
+      ),
+    );
   }
 
   @override

@@ -109,6 +109,7 @@ class FaxApiService {
     String? senderName,
     String? userEmail,
     String? countryCode,
+    String? quoteId,
   }) async {
     final response = await http.post(
       _uri('/send'),
@@ -116,6 +117,7 @@ class FaxApiService {
       body: jsonEncode({
         'upload_id': uploadId,
         'to_number': toNumber.trim(),
+        if (quoteId != null) 'quote_id': quoteId,
         if (senderName != null && senderName.trim().isNotEmpty)
           'sender_name': senderName.trim(),
         if (userEmail != null && userEmail.trim().isNotEmpty)

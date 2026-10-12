@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
@@ -13,30 +15,65 @@ class FaxHistoryScreen extends StatefulWidget {
   State<FaxHistoryScreen> createState() => _FaxHistoryScreenState();
 }
 
-class _FaxHistoryScreenState extends State<FaxHistoryScreen> {
+class _FaxHistoryScreenState extends State<FaxHistoryScreen>
+    with WidgetsBindingObserver {
   bool _loading = true;
   String? _error;
   List<FaxModel> _faxes = [];
+  Timer? _refreshTimer;
+  bool _requestInProgress = false;
+  bool _appResumed = true;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _appResumed =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     _loadHistory();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted && _appResumed && ModalRoute.of(context)?.isCurrent == true) {
+        _loadHistory(background: true);
+      }
+    });
   }
 
-  Future<void> _loadHistory() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _appResumed = state == AppLifecycleState.resumed;
+    if (_appResumed && mounted && ModalRoute.of(context)?.isCurrent == true) {
+      _loadHistory(background: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _loadHistory({bool background = false}) async {
+    if (!mounted || _requestInProgress) return;
+    _requestInProgress = true;
+    if (!background) {
+      setState(() {
+        _loading = _faxes.isEmpty;
+        _error = null;
+      });
+    }
 
     try {
-      final result = await FaxApiService.getHistory();
+      final result = await FaxApiService.getHistory().timeout(
+        const Duration(seconds: 20),
+      );
 
       if (!mounted) return;
 
       setState(() {
         _faxes = result;
+        _error = null;
       });
     } on FaxApiException catch (e) {
       if (!mounted) return;
@@ -51,6 +88,7 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen> {
         _error = 'Unable to load fax history.';
       });
     } finally {
+      _requestInProgress = false;
       if (mounted) {
         setState(() {
           _loading = false;
@@ -69,7 +107,26 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Fax History')),
-      body: RefreshIndicator(onRefresh: _loadHistory, child: _buildBody()),
+      body: Column(
+        children: [
+          if (_error != null && _faxes.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              color: Colors.orange.withValues(alpha: 0.12),
+              child: const Text(
+                'Unable to refresh. Showing the last known fax status. '
+                'Pull down to try again.',
+              ),
+            ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () => _loadHistory(),
+              child: _buildBody(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -78,7 +135,7 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error != null) {
+    if (_error != null && _faxes.isEmpty) {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
@@ -157,7 +214,7 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen> {
                             Text(
                               fax.direction.toLowerCase() == 'inbound'
                                   ? 'Received Fax'
-                                  : 'Sent Fax',
+                                  : 'Outgoing Fax',
                               style: const TextStyle(color: Colors.grey),
                             ),
                           ],
@@ -174,6 +231,29 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen> {
                   if (fax.pages != null) ...[
                     const SizedBox(height: 5),
                     Text('${fax.pages} page${fax.pages == 1 ? '' : 's'}'),
+                  ],
+                  if (FaxStatusChip.normalize(fax.status) == 'failed') ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        FaxStatusChip.failureMessage(fax.failureReason),
+                        style: TextStyle(color: Colors.red.shade700),
+                      ),
+                    ),
+                  ],
+                  if (fax.failureReason == 'submission_unconfirmed' &&
+                      FaxStatusChip.isPending(fax.status)) ...[
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Submission is not confirmed yet. '
+                      'Check the result before sending again.',
+                    ),
                   ],
                 ],
               ),

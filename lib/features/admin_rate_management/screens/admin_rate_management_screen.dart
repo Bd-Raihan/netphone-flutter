@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../fax/screens/admin_fax_management_screen.dart';
 
 import '../../admin_country_pricing/screens/admin_country_pricing_screen.dart';
 import '../../admin_rate_import/screens/admin_rate_import_screen.dart';
@@ -46,6 +47,19 @@ class AdminRateManagementScreen extends StatelessWidget {
                   builder: (_) => const AdminCountryPricingScreen(),
                 ),
               );
+            },
+          ),
+          const SizedBox(height: 16),
+          _managementCard(
+            context: context,
+            icon: Icons.fax,
+            title: 'Fax Rate Management',
+            description: 'Manage Fax Send/Receive prices and the private incoming inbox.',
+            buttonText: 'Open Fax Management',
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(
+                builder: (_) => const AdminFaxManagementScreen(),
+              ));
             },
           ),
         ],
