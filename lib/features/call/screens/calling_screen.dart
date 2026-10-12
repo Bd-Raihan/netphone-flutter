@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../recents/data/recent_calls_data.dart';
 import '../../wallet/data/wallet_data.dart';
@@ -38,6 +39,9 @@ class _CallingScreenState extends State<CallingScreen> {
 
   bool _isEndingCall = false;
   bool _summaryShown = false;
+  bool _isDtmfKeypadOpen = false;
+  BuildContext? _dtmfSheetContext;
+  String _dtmfDigits = '';
 
   /// =========================================
   /// Button States
@@ -455,14 +459,15 @@ class _CallingScreenState extends State<CallingScreen> {
   // ============================================================
 
   Future<void> _showDtmfKeypad() async {
-    if (!_voiceService.hasActiveCall) {
-      if (!mounted) {
-        return;
-      }
+    if (!mounted || _isDtmfKeypadOpen || _isEndingCall || _summaryShown) {
+      return;
+    }
 
+    if (!_voiceService.hasActiveCall ||
+        !_voiceService.currentState.isCallActive) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Keypad is available during an active call.'),
+          content: Text('Wait until the call is connected to use the keypad.'),
         ),
       );
 
@@ -484,117 +489,213 @@ class _CallingScreenState extends State<CallingScreen> {
       '#',
     ];
 
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Container(
-            padding: EdgeInsets.fromLTRB(24.w, 12.h, 24.w, 24.h),
-            decoration: const BoxDecoration(
-              color: Color(0xFF17181C),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 42.w,
-                  height: 4.h,
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                ),
+    String feedback = 'Tap a number to choose a menu option.';
+    bool feedbackIsError = false;
+    int pressSequence = 0;
+    _isDtmfKeypadOpen = true;
 
-                SizedBox(height: 16.h),
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (sheetContext) {
+          _dtmfSheetContext = sheetContext;
 
-                Text(
-                  'Keypad',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20.sp,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+          return StatefulBuilder(
+            builder: (keypadContext, setKeypadState) {
+              return SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  child: Container(
+                    padding: EdgeInsets.fromLTRB(24.w, 12.h, 24.w, 24.h),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF17181C),
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(26),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 42.w,
+                          height: 4.h,
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
 
-                SizedBox(height: 4.h),
+                        SizedBox(height: 16.h),
 
-                Text(
-                  'Tap a number to send DTMF',
-                  style: TextStyle(color: Colors.white54, fontSize: 12.sp),
-                ),
+                        Text(
+                          'Keypad',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20.sp,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
 
-                SizedBox(height: 20.h),
+                        SizedBox(height: 12.h),
 
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: tones.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    mainAxisSpacing: 14,
-                    crossAxisSpacing: 18,
-                    childAspectRatio: 1.35,
-                  ),
-                  itemBuilder: (context, index) {
-                    final tone = tones[index];
+                        Text(
+                          'Pressed keys',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12.sp,
+                          ),
+                        ),
 
-                    return Material(
-                      color: const Color(0xFF292B31),
-                      shape: const CircleBorder(),
-                      child: InkWell(
-                        customBorder: const CircleBorder(),
-                        onTap: () async {
-                          try {
-                            await _voiceService.sendDtmf(tone);
-                          } catch (error) {
-                            if (!mounted) {
-                              return;
-                            }
+                        SizedBox(height: 6.h),
 
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(content: Text('DTMF failed: $error')),
-                            );
-                          }
-                        },
-                        child: Center(
-                          child: Text(
-                            tone,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 24.sp,
-                              fontWeight: FontWeight.w600,
+                        Container(
+                          width: double.infinity,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 16.w,
+                            vertical: 12.h,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white10,
+                            borderRadius: BorderRadius.circular(12.r),
+                          ),
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            reverse: true,
+                            child: Text(
+                              _dtmfDigits.isEmpty
+                                  ? 'No keys pressed'
+                                  : _dtmfDigits,
+                              textDirection: TextDirection.ltr,
+                              style: TextStyle(
+                                color: _dtmfDigits.isEmpty
+                                    ? Colors.white38
+                                    : Colors.white,
+                                fontSize: _dtmfDigits.isEmpty ? 14.sp : 24.sp,
+                                letterSpacing: 2,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
 
-                SizedBox(height: 14.h),
+                        SizedBox(height: 8.h),
 
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(sheetContext).pop();
-                  },
-                  child: const Text('Close'),
+                        Text(
+                          feedback,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: feedbackIsError
+                                ? Colors.redAccent
+                                : Colors.white54,
+                            fontSize: 12.sp,
+                          ),
+                        ),
+
+                        SizedBox(height: 20.h),
+
+                        GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: tones.length,
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                mainAxisSpacing: 14,
+                                crossAxisSpacing: 18,
+                                childAspectRatio: 1.35,
+                              ),
+                          itemBuilder: (context, index) {
+                            final tone = tones[index];
+
+                            return Material(
+                              color: const Color(0xFF292B31),
+                              shape: const CircleBorder(),
+                              child: InkWell(
+                                customBorder: const CircleBorder(),
+                                onTap: () async {
+                                  if (!mounted ||
+                                      _isEndingCall ||
+                                      _summaryShown) {
+                                    return;
+                                  }
+
+                                  final thisPress = ++pressSequence;
+                                  HapticFeedback.selectionClick();
+
+                                  setKeypadState(() {
+                                    _dtmfDigits += tone;
+                                    feedback =
+                                        'Pressed $tone. Listen for the menu response.';
+                                    feedbackIsError = false;
+                                  });
+
+                                  try {
+                                    await _voiceService.sendDtmf(tone);
+                                  } catch (error) {
+                                    if (!mounted ||
+                                        !keypadContext.mounted ||
+                                        thisPress != pressSequence) {
+                                      return;
+                                    }
+
+                                    setKeypadState(() {
+                                      feedback = 'Unable to send $tone: $error';
+                                      feedbackIsError = true;
+                                    });
+                                  }
+                                },
+                                child: Center(
+                                  child: Text(
+                                    tone,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 24.sp,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+
+                        SizedBox(height: 14.h),
+
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(sheetContext).pop();
+                          },
+                          child: const Text('Close'),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      _dtmfSheetContext = null;
+      _isDtmfKeypadOpen = false;
+    }
   }
 
   Future<void> endCurrentCall() async {
     if (_isEndingCall || _summaryShown) {
       return;
     }
+
+    // Close only this keypad before opening the call summary.
+    final keypadContext = _dtmfSheetContext;
+    if (keypadContext != null &&
+        keypadContext.mounted &&
+        ModalRoute.of(keypadContext)?.isCurrent == true) {
+      Navigator.of(keypadContext).pop();
+    }
+
     final callTimeText = TimeOfDay.now().format(context);
 
     _isEndingCall = true;

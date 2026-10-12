@@ -13,6 +13,7 @@ class DialPadScreen extends StatefulWidget {
 
 class _DialPadScreenState extends State<DialPadScreen> {
   final TextEditingController _controller = TextEditingController();
+  bool _isPasting = false;
 
   final List<Map<String, String>> dialPad = const [
     {'number': '1', 'letters': ''},
@@ -31,6 +32,59 @@ class _DialPadScreenState extends State<DialPadScreen> {
 
   String get phoneNumber => _controller.text.trim();
 
+  void _insertAtSelection(String value) {
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final hasValidSelection =
+        selection.isValid &&
+        selection.start <= text.length &&
+        selection.end <= text.length;
+    final start = hasValidSelection ? selection.start : text.length;
+    final end = hasValidSelection ? selection.end : text.length;
+
+    _controller.value = TextEditingValue(
+      text: text.replaceRange(start, end, value),
+      selection: TextSelection.collapsed(offset: start + value.length),
+    );
+
+    setState(() {});
+  }
+
+  Future<void> _pasteNumber() async {
+    if (_isPasting) {
+      return;
+    }
+
+    _isPasting = true;
+
+    try {
+      final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+
+      if (!mounted) {
+        return;
+      }
+
+      // Match the characters already allowed by the number field.
+      final value = (clipboard?.text ?? '').replaceAll(
+        RegExp(r'[^0-9\+\#\-\s\(\)]'),
+        '',
+      );
+
+      if (value.trim().isEmpty) {
+        _showMessage('No phone number to paste');
+        return;
+      }
+
+      _insertAtSelection(value);
+    } on PlatformException {
+      if (mounted) {
+        _showMessage('Unable to paste. Please try again.');
+      }
+    } finally {
+      _isPasting = false;
+    }
+  }
+
   void _addNumber(String value) {
     HapticFeedback.selectionClick();
 
@@ -41,15 +95,16 @@ class _DialPadScreenState extends State<DialPadScreen> {
       }
 
       _controller.text = '+${_controller.text}';
-    } else {
-      _controller.text += value;
+
+      _controller.selection = TextSelection.collapsed(
+        offset: _controller.text.length,
+      );
+
+      setState(() {});
+      return;
     }
 
-    _controller.selection = TextSelection.collapsed(
-      offset: _controller.text.length,
-    );
-
-    setState(() {});
+    _insertAtSelection(value);
   }
 
   void _removeNumber() {
@@ -59,13 +114,25 @@ class _DialPadScreenState extends State<DialPadScreen> {
       return;
     }
 
-    _controller.text = _controller.text.substring(
-      0,
-      _controller.text.length - 1,
-    );
+    final text = _controller.text;
+    final selection = _controller.selection;
+    final hasValidSelection =
+        selection.isValid &&
+        selection.start <= text.length &&
+        selection.end <= text.length;
+    var start = hasValidSelection ? selection.start : text.length;
+    final end = hasValidSelection ? selection.end : text.length;
 
-    _controller.selection = TextSelection.collapsed(
-      offset: _controller.text.length,
+    if (start == end) {
+      if (start == 0) {
+        return;
+      }
+      start--;
+    }
+
+    _controller.value = TextEditingValue(
+      text: text.replaceRange(start, end, ''),
+      selection: TextSelection.collapsed(offset: start),
     );
 
     setState(() {});
@@ -193,9 +260,12 @@ class _DialPadScreenState extends State<DialPadScreen> {
                           child: TextField(
                             controller: _controller,
                             textAlign: TextAlign.center,
-                            readOnly: true,
+                            textDirection: TextDirection.ltr,
+                            readOnly: false,
                             showCursor: true,
+                            enableInteractiveSelection: true,
                             keyboardType: TextInputType.none,
+                            onChanged: (_) => setState(() {}),
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(
                                 RegExp(r'[0-9\+\#\-\s\(\)]'),
@@ -209,6 +279,15 @@ class _DialPadScreenState extends State<DialPadScreen> {
                             ),
                             decoration: InputDecoration(
                               hintText: '+ Country code number',
+                              suffixIcon: IconButton(
+                                tooltip: 'Paste number',
+                                onPressed: _pasteNumber,
+                                icon: Icon(
+                                  Icons.content_paste_outlined,
+                                  size: 20.sp,
+                                  color: const Color(0xFF202124),
+                                ),
+                              ),
                               border: InputBorder.none,
                               isDense: true,
                               contentPadding: EdgeInsets.zero,

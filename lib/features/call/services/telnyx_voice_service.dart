@@ -481,10 +481,22 @@ class TelnyxVoiceService {
   }
 
   Future<void> sendDtmf(String tone) async {
+    if (_isDisposed) {
+      throw StateError('Call is no longer available');
+    }
+
     final call = _activeCall;
 
     if (call == null) {
       throw StateError('No active Telnyx call');
+    }
+
+    if (_isEnding || !_state.isCallActive) {
+      throw StateError('Wait until the call is connected to use the keypad');
+    }
+
+    if (!_client.isConnected()) {
+      throw StateError('Voice connection is unavailable. Please try again');
     }
 
     const validTones = <String>{
@@ -508,6 +520,7 @@ class TelnyxVoiceService {
       throw const FormatException('Invalid DTMF tone');
     }
 
+    // The SDK dispatches the key; it does not confirm IVR delivery.
     call.dtmf(normalizedTone);
   }
 
