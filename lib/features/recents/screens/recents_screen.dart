@@ -4,8 +4,91 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../call/screens/calling_screen.dart';
 import '../data/recent_calls_data.dart';
 
-class RecentsScreen extends StatelessWidget {
+class RecentsScreen extends StatefulWidget {
   const RecentsScreen({super.key});
+
+  @override
+  State<RecentsScreen> createState() => _RecentsScreenState();
+}
+
+class _RecentsScreenState extends State<RecentsScreen> {
+  bool _isCallConfirmationOpen = false;
+
+  Future<void> _confirmCall(Map<String, dynamic> call) async {
+    if (_isCallConfirmationOpen || !mounted) {
+      return;
+    }
+
+    final number = (call["number"] ?? '').toString();
+    final name = (call["name"] ?? 'Unknown').toString();
+
+    if (number.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No phone number available')),
+      );
+      return;
+    }
+
+    _isCallConfirmationOpen = true;
+
+    try {
+      final shouldCall = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: const Color(0xFF1B1B1B),
+          scrollable: true,
+          title: const Text(
+            'Call this number?',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: const TextStyle(color: Colors.white)),
+              SizedBox(height: 8.h),
+              Text(
+                number,
+                textDirection: TextDirection.ltr,
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              icon: const Icon(Icons.call),
+              label: const Text('Call'),
+            ),
+          ],
+        ),
+      );
+
+      if (!mounted || shouldCall != true) {
+        return;
+      }
+
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => CallingScreen(phoneNumber: number, contactName: name),
+        ),
+      );
+    } finally {
+      _isCallConfirmationOpen = false;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,17 +137,7 @@ class RecentsScreen extends StatelessWidget {
                 }
 
                 return InkWell(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => CallingScreen(
-                          phoneNumber: call["number"],
-                          contactName: call["name"],
-                        ),
-                      ),
-                    );
-                  },
+                  onTap: () => _confirmCall(call),
 
                   child: Container(
                     margin: EdgeInsets.symmetric(
