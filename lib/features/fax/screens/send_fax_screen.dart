@@ -1,3 +1,5 @@
+import '../widgets/fax_help_panel.dart';
+import '../widgets/fax_blue_theme.dart';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -117,14 +119,14 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
           return;
         }
       }
-      final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
         title: const Text('Confirm Fax'),
         content: Text('To: ${_toController.text.trim()}\n'
           '${quote['pages'] == null ? '' : 'Pages: ${quote['pages']}\n'}'
-          'Fee: ${FaxPlatformApi.usd(quote['amount_usd'])}\n\n'
-          'The fee is charged before sending. If the fax fails, the prepaid fax fee is refunded.'),
+          'Prepaid ceiling: ${FaxPlatformApi.usd(quote['amount_usd'])}\n\n'
+          '${quote['dynamic'] == true ? 'The prepaid amount is deducted now. Final fee = actual Fax API + SIP cost plus 40%, or the applicable manual per-page minimum if higher, up to this ceiling. Unused funds are refunded after provider billing arrives. Failed attempts may have a fee.' : 'The fee is charged before sending. If the fax fails, the prepaid fax fee is refunded.'}'),
         actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm & Send'))],
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, true), child: const Text('Confirm & Send'))],
       ));
       if (confirmed != true || !mounted) return;
       submissionStarted = true;
@@ -236,7 +238,9 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => FaxBlueTheme(builder: _buildFax);
+
+  Widget _buildFax(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Send Fax')),
       body: SafeArea(
@@ -245,6 +249,8 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              const FaxHelpPanel(),
+              const SizedBox(height: 12),
               InkWell(
                 onTap: _sending ? null : _pickDocument,
                 borderRadius: BorderRadius.circular(14),

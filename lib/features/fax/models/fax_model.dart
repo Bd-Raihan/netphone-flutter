@@ -1,4 +1,5 @@
 class FaxModel {
+  final Map<String, dynamic>? billing;
   final int id;
   final String direction;
   final String? fromNumber;
@@ -13,6 +14,7 @@ class FaxModel {
 
   const FaxModel({
     required this.id,
+    this.billing,
     required this.direction,
     required this.status,
     this.fromNumber,
@@ -28,6 +30,7 @@ class FaxModel {
   factory FaxModel.fromJson(Map<String, dynamic> json) {
     return FaxModel(
       id: _toInt(json['id']) ?? 0,
+      billing: json['billing'] is Map ? Map<String, dynamic>.from(json['billing'] as Map) : null,
       direction: json['direction']?.toString() ?? '',
       fromNumber: json['from_number']?.toString(),
       toNumber: json['to_number']?.toString(),

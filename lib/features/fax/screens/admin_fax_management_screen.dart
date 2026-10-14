@@ -1,18 +1,25 @@
+import '../widgets/fax_blue_theme.dart';
+import 'admin_fax_pricing_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import 'package:open_filex/open_filex.dart';
 import '../services/fax_platform_api.dart';
 
 class AdminFaxManagementScreen extends StatefulWidget {
-  const AdminFaxManagementScreen({super.key});
+  final bool inboxOnly;
+  const AdminFaxManagementScreen({super.key, this.inboxOnly = false});
   @override
   State<AdminFaxManagementScreen> createState() => _AdminFaxManagementScreenState();
 }
 
 class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
   List<Map<String, dynamic>> _rates = [], _inbox = [];
-  bool _loading = true, _charging = false, _busy = false;
+  bool _loading = true, _charging = false, _busy = false, _adminVerified = false;
   String? _error;
+  String? _lastUpload;
+  Map<String, dynamic> _actual = {}; 
 
   @override
   void initState() {super.initState(); _load();}
@@ -22,14 +29,22 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
 
   Future<void> _load() async {
     try {
+      final profile = await FaxPlatformApi.request('/receive-profile');
+      if (!mounted) return;
+      if (profile['is_admin'] != true) {
+        setState(() { _adminVerified = false; _loading = false; _error = 'Admin access required.'; });
+        return;
+      }
+      _adminVerified = true;
       final results = await Future.wait([
         FaxPlatformApi.request('/admin/rates'),
         FaxPlatformApi.request('/admin/inbox'),
+        FaxPlatformApi.request('/admin/actual-billing'),
       ]);
       if (!mounted) return;
       setState(() {
         _rates = _items(results[0]['rates']); _inbox = _items(results[1]['faxes']);
-        _charging = results[0]['billing_enabled'] == true; _error = null;
+        _charging = results[0]['billing_enabled'] == true; _actual = results[2]; _error = null;
       });
     } catch (error) {
       if (mounted) setState(() {_error = error.toString();});
@@ -45,12 +60,12 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
   Future<void> _toggle(bool enabled) async {
     if (_busy) return;
     if (enabled) {
-      final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+      final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
         title: const Text('Enable fax charging?'),
-        content: const Text('Enable after verified rates and the updated app are ready. '
-          'Users must confirm the fee before sending. Older app versions will need an update to send faxes.'),
+        content: const Text('Enable after the Fax deck import and a verified Telnyx usage sync. '
+          'Users approve a prepaid ceiling. Actual billing is finalized later; overruns are absorbed by the operator. Update the user app first.'),
         actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enable'))]));
+          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, true), child: const Text('Enable'))]));
       if (approved != true || !mounted) return;
     }
     setState(() {_busy = true;});
@@ -61,74 +76,72 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
     finally {if (mounted) setState(() {_busy = false;});}
   }
 
-  Future<void> _editRate([Map<String, dynamic>? rate]) async {
-    final country = TextEditingController(text: rate?['country_name']?.toString() ?? '');
-    final code = TextEditingController(text: rate?['country_code']?.toString() ?? '');
-    final prefix = TextEditingController(text: rate?['phone_prefix']?.toString() ?? '');
-    final cost = TextEditingController(text: rate?['provider_cost_usd_per_page']?.toString() ?? '');
-    final markup = TextEditingController(text: rate?['markup_percent']?.toString() ?? '40');
-    final manual = TextEditingController(text: rate?['manual_sell_usd_per_page']?.toString() ?? '');
-    var direction = rate?['direction']?.toString() ?? 'outbound';
-    var active = rate?['is_active'] == true, confirmed = rate?['cost_confirmed'] == true, saving = false;
-    String? error;
-    final key = GlobalKey<FormState>();
+  Future<void> _importCsv(bool deck) async {
+    if (_busy) return;
+    setState(() { _busy = true; });
     try {
-      await showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) =>
-        StatefulBuilder(builder: (context, update) => AlertDialog(
-          title: Text(rate == null ? 'Add Fax Rate' : 'Edit Fax Rate'),
-          content: SizedBox(width: 480, child: SingleChildScrollView(child: Form(key: key, child: Column(
-            mainAxisSize: MainAxisSize.min, children: [
-              _field(country, 'Country / region'), _field(code, 'Country code (e.g. US)'),
-              _field(prefix, 'Phone prefix (e.g. 1205)'),
-              DropdownButtonFormField<String>(value: direction,
-                decoration: const InputDecoration(labelText: 'Direction'),
-                items: const [DropdownMenuItem(value: 'outbound', child: Text('Send')),
-                  DropdownMenuItem(value: 'inbound', child: Text('Receive'))],
-                onChanged: saving ? null : (value) => update(() {direction = value!;})),
-              _field(cost, 'Total provider cost / page (USD)', numeric: true),
-              const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text(
-                'Include Fax API and allocated SIP transmission cost. Receive pricing follows the receiving number.')),
-              _field(markup, 'Markup % (40 = cost × 1.40)', numeric: true),
-              _field(manual, 'Manual sell rate / page (optional)', numeric: true, optional: true),
-              CheckboxListTile(contentPadding: EdgeInsets.zero, value: confirmed,
-                title: const Text('I verified the complete provider cost.'),
-                onChanged: saving ? null : (value) => update(() {confirmed = value == true;})),
-              SwitchListTile(contentPadding: EdgeInsets.zero, value: active, title: const Text('Active'),
-                onChanged: saving ? null : (value) => update(() {active = value;})),
-              if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
-            ])))),
-          actions: [TextButton(onPressed: saving ? null : () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-            FilledButton(onPressed: saving ? null : () async {
-              if (!key.currentState!.validate()) return;
-              update(() {saving = true; error = null;});
-              try {
-                await FaxPlatformApi.request('/admin/rates', method: 'POST', body: {
-                  if (rate != null) 'id': rate['id'], if (rate != null) 'revision': rate['revision'],
-                  'country_name': country.text.trim(), 'country_code': code.text.trim(),
-                  'phone_prefix': prefix.text.trim(), 'direction': direction,
-                  'provider_cost_usd_per_page': cost.text.trim(),
-                  'markup_percent': double.tryParse(markup.text.trim()),
-                  'manual_sell_usd_per_page': manual.text.trim().isEmpty ? null : manual.text.trim(),
-                  'cost_confirmed': confirmed, 'is_active': active,
-                });
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                await _load();
-              } catch (e) {
-                if (dialogContext.mounted) update(() {saving = false; error = e.toString();});
-              }
-            }, child: Text(saving ? 'Saving...' : 'Save'))],
-        )));
-    } finally {
-      for (final controller in [country, code, prefix, cost, markup, manual]) {controller.dispose();}
-    }
+      // CSV MIME labels differ across Android document providers. Validate after selection.
+      final picked = await FilePicker.pickFiles(type: FileType.any, withData: true);
+      if (picked == null || !mounted) return;
+      final file = picked.files.single;
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        throw Exception('Choose the extracted .csv file. ZIP, PDF and Excel .xlsx files cannot be imported.');
+      }
+      if (file.size > 48 * 1024 * 1024) throw Exception('Choose a CSV under 48 MB.');
+      final bytes = file.bytes ?? (file.path == null ? null : await File(file.path!).readAsBytes());
+      if (bytes == null || bytes.isEmpty) {
+        throw Exception('This file is empty (0 B). Download/extract the original CSV again, then select it.');
+      }
+      if (bytes.length > 48 * 1024 * 1024) throw Exception('Choose a CSV under 48 MB.');
+      if (!mounted) return;
+      setState(() { _lastUpload = 'Uploading: ${file.name}'; });
+      final result = await FaxPlatformApi.importCsv(deck ? '/admin/fax-deck' : '/admin/fax-usage', bytes);
+      final message = deck ? 'Rate chart imported: ${result['rows']} routes.'
+        : 'Usage imported: ${result['accepted']} records; ${result['unrelated']} unrelated; ${result['rejected']} rejected.';
+      if (mounted) setState(() { _lastUpload = '${file.name} — $message'; });
+      _message(message);
+      await _load();
+    } catch (e) {
+      if (mounted) setState(() { _lastUpload = 'Upload failed. Select a valid CSV and try again.'; });
+      _message(e.toString());
+    } finally { if (mounted) setState(() { _busy = false; }); }
   }
 
-  Widget _field(TextEditingController controller, String label, {bool numeric = false, bool optional = false}) =>
+  Future<void> _syncUsage() async {
+    if (_busy) return;
+    setState(() { _busy = true; });
+    try {
+      await FaxPlatformApi.request('/admin/fax-usage/sync', method: 'POST');
+      _message('Telnyx usage sync completed.');
+    } catch (e) { _message(e.toString()); }
+    finally { await _load(); if (mounted) setState(() { _busy = false; }); }
+  }
+
+  Future<void> _estimate() async {
+    var seconds = (_actual['estimate_seconds_per_page'] ?? 120).toString();
+    final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
+      title: const Text('Send reserve estimate'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('Seconds per page used for the prepaid ceiling. Actual provider costs can exceed this estimate; the operator absorbs the difference. This is not a transmission time limit.'),
+        TextFormField(initialValue: seconds, keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Seconds per page: 60–3600'), onChanged: (value) => seconds = value),
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, true), child: const Text('Save'))],
+    ));
+    if (approved != true || !mounted) return;
+    try { await FaxPlatformApi.request('/admin/actual-billing', method: 'PATCH', body: {'estimate_seconds_per_page': int.tryParse(seconds)}); await _load(); }
+    catch (e) { _message(e.toString()); }
+  }
+
+  Widget _field(String initialValue, ValueChanged<String> onChanged, String label, {bool numeric = false, bool optional = false, String? hint, String? Function(String?)? validate}) =>
     Padding(padding: const EdgeInsets.only(bottom: 12), child: TextFormField(
-      controller: controller,
+      key: label.startsWith('Number prefix') ? ValueKey(initialValue) : null,
+      initialValue: initialValue,
+      onChanged: onChanged,
       keyboardType: numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
-      decoration: InputDecoration(labelText: label),
-      validator: (text) => !optional && (text == null || text.trim().isEmpty) ? 'Required' : null,
+      decoration: InputDecoration(labelText: label, helperText: hint),
+      validator: (text) => !optional && (text == null || text.trim().isEmpty) ? 'Required' : validate?.call(text),
     ));
 
   Future<void> _view(Map<String, dynamic> fax) async {
@@ -144,21 +157,21 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
   }
 
   Future<void> _assign(Map<String, dynamic> fax) async {
-    final code = TextEditingController(), reference = TextEditingController();
+    var code = '', reference = '';
+    var assigned = false;
     var verified = false, waive = false, saving = false;
     String? error;
-    try {
-      await showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) =>
-        StatefulBuilder(builder: (context, update) => AlertDialog(
+    await showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) =>
+        StatefulBuilder(builder: (context, update) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
           title: const Text('Assign Incoming Fax'),
           content: SizedBox(width: 420, child: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min, children: [
               const Text('Open the PDF first. Verify its Receive ID and intended recipient. '
                 'The recipient cannot be changed after assignment.'),
               const SizedBox(height: 12),
-              TextField(controller: code, decoration: const InputDecoration(labelText: 'Recipient Receive ID')),
-              TextField(controller: reference, maxLength: 300,
-                decoration: const InputDecoration(labelText: 'Verification reference (without sensitive content)')),
+              TextField(onChanged: (value) => code = value, decoration: const InputDecoration(labelText: 'Recipient Receive ID')),
+              TextField(onChanged: (value) => reference = value, maxLength: 300,
+                decoration: const InputDecoration(labelText: 'How did you verify the recipient?')),
               CheckboxListTile(contentPadding: EdgeInsets.zero, value: verified,
                 title: const Text('I checked the document and verified this recipient.'),
                 onChanged: saving ? null : (value) => update(() {verified = value == true;})),
@@ -168,21 +181,28 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
               if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
             ]))),
           actions: [TextButton(onPressed: saving ? null : () => Navigator.pop(dialogContext), child: const Text('Cancel')),
-            FilledButton(onPressed: saving || !verified ? null : () async {
+            FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: saving || !verified ? null : () async {
               update(() {saving = true; error = null;});
               try {
                 await FaxPlatformApi.request('/admin/inbox/${fax['id']}/assign', method: 'POST', body: {
-                  'receive_code': code.text.trim(), 'verified_reference': reference.text.trim(),
+                  'receive_code': code.trim(), 'verified_reference': reference.trim(),
                   'recipient_verified': verified, 'waive_fee': waive,
                 });
-                if (dialogContext.mounted) Navigator.pop(dialogContext);
-                await _load();
+                assigned = true;
+                if (dialogContext.mounted) {
+                  FocusScope.of(dialogContext).unfocus();
+                  Navigator.pop(dialogContext);
+                }
               } catch (e) {
                 if (dialogContext.mounted) update(() {saving = false; error = e.toString();});
               }
             }, child: Text(saving ? 'Assigning...' : 'Assign'))],
         )));
-    } finally {code.dispose(); reference.dispose();}
+    if (!mounted || !assigned) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Fax assigned successfully.')),
+    );
+    await _load();
   }
 
   String _date(dynamic value) {
@@ -190,38 +210,104 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
     return date == null ? '-' : DateFormat('dd MMM yyyy, hh:mm a').format(date.toLocal());
   }
 
+  Widget _stepCard(String title, String description, List<Widget> actions) => Card(
+    margin: const EdgeInsets.only(bottom: 14),
+    child: Padding(padding: const EdgeInsets.all(16), child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 6),
+        Text(description, style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(height: 12),
+        ...actions,
+      ],
+    )),
+  );
+
+  Widget _uploadButton(String label, VoidCallback action, {bool secondary = false}) {
+    final style = FilledButton.styleFrom(
+      backgroundColor: secondary ? const Color(0xFFE3F2FD) : const Color(0xFF168FE5),
+      foregroundColor: secondary ? const Color(0xFF075A95) : Colors.white,
+      minimumSize: const Size(0, 48),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    );
+    return FilledButton.icon(style: style, onPressed: _busy ? null : action,
+      icon: const Icon(Icons.upload_file, size: 20),
+      label: Text(label, textAlign: TextAlign.center));
+  }
+
   @override
-  Widget build(BuildContext context) => DefaultTabController(length: 2, child: Scaffold(
-    appBar: AppBar(title: const Text('Fax Management'), actions: [
+  Widget build(BuildContext context) => FaxBlueTheme(builder: _buildFax);
+
+  Widget _buildFax(BuildContext context) => DefaultTabController(length: 1, child: Scaffold(
+    appBar: AppBar(title: Text(widget.inboxOnly ? 'Admin Fax Inbox' : 'Fax Rate Management'), actions: [
       IconButton(onPressed: _load, tooltip: 'Refresh', icon: const Icon(Icons.refresh)),
-    ], bottom: const TabBar(tabs: [Tab(text: 'Fax Rates'), Tab(text: 'Private Inbox')])),
-    body: _loading ? const Center(child: CircularProgressIndicator()) : Column(children: [
+    ], bottom: TabBar(tabs: [Tab(text: widget.inboxOnly ? 'Private Inbox' : 'Fax Rates')])),
+    body: _loading ? const Center(child: CircularProgressIndicator()) : !_adminVerified
+      ? Center(child: Text(_error ?? 'Admin access required.')) : Column(children: [
       if (_error != null) Padding(padding: const EdgeInsets.all(12), child: Text(_error!, style: const TextStyle(color: Colors.red))),
       Expanded(child: TabBarView(children: [
-        RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
-          SwitchListTile(title: const Text('Enable fax charging'), value: _charging,
-            subtitle: const Text('Activate after rates and the updated app are ready.'), onChanged: _busy ? null : _toggle),
-          FilledButton.icon(onPressed: _busy ? null : () => _editRate(), icon: const Icon(Icons.add), label: const Text('Add Fax Rate')),
-          const SizedBox(height: 12),
-          if (_rates.isEmpty) const Text('Add verified Send and Receive prices. No country costs are assumed.'),
-          if (_rates.isNotEmpty) SingleChildScrollView(scrollDirection: Axis.horizontal,
-            child: DataTable(columns: const [
-              DataColumn(label: Text('Country / Prefix')), DataColumn(label: Text('Direction')),
-              DataColumn(label: Text('Cost/page'), numeric: true), DataColumn(label: Text('Sell/page'), numeric: true),
-              DataColumn(label: Text('Profit/page'), numeric: true), DataColumn(label: Text('Mode')),
-              DataColumn(label: Text('Status')), DataColumn(label: Text('Edit')),
-            ], rows: _rates.map((rate) => DataRow(cells: [
-              DataCell(Text('${rate['country_name']}\n+${rate['phone_prefix']}')),
-              DataCell(Text(rate['direction'] == 'inbound' ? 'Receive' : 'Send')),
-              DataCell(Text(FaxPlatformApi.usd(rate['provider_cost_usd_per_page']))),
-              DataCell(Text(FaxPlatformApi.usd(rate['sell_usd_per_page']))),
-              DataCell(Text(FaxPlatformApi.usd(rate['profit_usd_per_page']))),
-              DataCell(Text(rate['manual_sell_usd_per_page'] == null ? '${rate['markup_percent']}% markup' : 'Manual')),
-              DataCell(Text(rate['is_active'] == true ? 'Active' : 'Inactive')),
-              DataCell(IconButton(icon: const Icon(Icons.edit), onPressed: () => _editRate(rate))),
-            ])).toList())),
+        if (!widget.inboxOnly) RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
+          _stepCard('Country rates & manual control',
+            'Browse provider rates by country. Set a minimum selling price per page; automatic actual-cost billing continues.', [
+              FilledButton.icon(onPressed: _busy ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminFaxPricingScreen())), icon: const Icon(Icons.price_change), label: const Text('View / Edit country rates')),
+            ]),
+          _stepCard('1. Fax rate chart',
+            'Upload the Telnyx Global Conversational rate CSV. Extract the ZIP first.', [
+              _uploadButton('Upload rate CSV', () => _importCsv(true)),
+              const SizedBox(height: 10),
+              Text(_actual['deck_version'] == null ? 'Status: Not uploaded' : 'Status: Rate chart ready'),
+            ]),
+          _stepCard('2. Billing connection',
+            'Sync Telnyx billing records. Both Send and Receive must be verified before charging.', [
+              _uploadButton('Sync billing', _syncUsage),
+              const SizedBox(height: 10),
+              Text(_actual['adapter_verified'] == true ? 'Status: Verified' : 'Status: Verification pending'),
+              Text('Last sync: ${_actual['last_usage_sync'] == null ? 'Not completed' : _date(_actual['last_usage_sync'])}'),
+              if (_actual['usage_sync_error'] != null) Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('Automatic sync needs attention. See Billing details below.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            ]),
+          Card(margin: const EdgeInsets.only(bottom: 14), child: SwitchListTile(
+            title: const Text('3. Enable fax charging'), value: _charging,
+            subtitle: const Text('Turn on after billing verification and a small paid test.'),
+            onChanged: _busy || (!_charging && _actual['adapter_verified'] != true) ? null : _toggle)),
+          if (_busy) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LinearProgressIndicator()),
+          if (_lastUpload != null) Padding(padding: const EdgeInsets.only(bottom: 14), child: Text(_lastUpload!)),
+          Card(margin: const EdgeInsets.only(bottom: 14), child: ExpansionTile(
+            title: const Text('Manual usage reports'),
+            subtitle: const Text('Use when automatic sync needs review'),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              const Text('Upload Fax API and Calls CSV reports for the same dates. Reports do not replace the rate chart.'),
+              const SizedBox(height: 12),
+              SizedBox(width: double.infinity, child: _uploadButton('Upload usage CSV', () => _importCsv(false), secondary: true)),
+            ],
+          )),
+          Card(margin: const EdgeInsets.only(bottom: 14), child: ExpansionTile(
+            title: const Text('Billing details'),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            children: [
+              const Text('Final fee = the higher of (actual Fax API + SIP cost) × 1.40 and your manual per-page minimum. Unused Send prepayment is refunded. The customer is never charged above the approved ceiling. Failed transmissions may incur fees.'),
+              const SizedBox(height: 8),
+              const Text('Costs above the Send ceiling are absorbed by the operator. The estimate is not a transmission time limit.'),
+              TextButton(onPressed: _busy ? null : _estimate, child: const Text('Send prepayment estimate')),
+              Text('Previous rate entries retained: ${_rates.length}'),
+              if (_actual['usage_sync_error'] != null) Text(_actual['usage_sync_error'].toString(),
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ],
+          )),
+          const Text('Recent fax bills', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+          if (_items(_actual['bills']).isEmpty) const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('No new paid fax bills yet.')),
+          for (final bill in _items(_actual['bills'])) Card(child: ListTile(
+            title: Text("Fax ${bill['fax_id']} · ${bill['direction']} · ${bill['state']}"),
+            subtitle: Text("${bill['actual_settled'] == true ? 'Final' : 'Awaiting provider billing'} · ${FaxPlatformApi.usd(bill['amount_usd'])}\nProvider cost: ${bill['provider_cost_usd'] == null ? 'Pending' : FaxPlatformApi.usd(bill['provider_cost_usd'])}\nAPI: ${bill['billing_details']?['api_cost_usd'] ?? '-'} USD · SIP: ${bill['billing_details']?['sip_cost_usd'] ?? '-'} USD\nBilled seconds: ${bill['billing_details']?['billed_seconds'] ?? 'Not reported'}\nRefund: ${bill['refund_usd'] == null ? '-' : FaxPlatformApi.usd(bill['refund_usd'])} · Operator absorbs: ${FaxPlatformApi.usd(bill['shortfall_usd'])}"),
+          )),
         ])),
-        RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
+        if (widget.inboxOnly) RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
           OutlinedButton.icon(icon: const Icon(Icons.sync), label: const Text('Check received faxes'), onPressed: _busy ? null : () async {
             try {
               await FaxPlatformApi.request('/admin/inbox/scan', method: 'POST');
@@ -239,7 +325,7 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
               const SizedBox(height: 10),
               Wrap(spacing: 12, children: [
                 OutlinedButton(onPressed: _busy ? null : () => _view(fax), child: const Text('Review PDF')),
-                if (fax['user_id'] == null) FilledButton(onPressed: _busy ? null : () => _assign(fax), child: const Text('Assign Recipient')),
+                if (fax['user_id'] == null) FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: _busy ? null : () => _assign(fax), child: const Text('Assign Recipient')),
               ]),
             ]))),
         ])),

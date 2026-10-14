@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../models/fax_model.dart';
 import '../services/fax_api_service.dart';
+import '../services/fax_platform_api.dart';
 import '../widgets/fax_status_chip.dart';
 import 'fax_document_view_screen.dart';
 
@@ -101,6 +102,26 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen>
     if (date == null) return '-';
 
     return DateFormat('dd MMM yyyy, hh:mm a').format(date.toLocal());
+  }
+
+  Widget _billing(FaxModel fax) {
+    final b = fax.billing;
+    if (b == null) return const Text('Billing: No charge recorded', style: TextStyle(fontSize: 12));
+    final state = b['state']?.toString() ?? '';
+    final pending = b['pending'] == true;
+    final label = pending ? (fax.direction == 'inbound' ? 'Estimated due (bill pending)' : 'Reserved (bill pending)') : state == 'payment_due' ? 'Amount due' : state == 'free' ? 'Free' : state == 'refunded' ? 'Refunded' : 'Charged';
+    return Padding(padding: const EdgeInsets.only(top: 8), child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('$label: ${FaxPlatformApi.usd(b['amount_usd'])}', style: const TextStyle(fontWeight: FontWeight.w600)),
+        if (pending) const Text('Final charge will update after provider billing.', style: TextStyle(fontSize: 12)),
+        if (b['refund_usd'] != null && (double.tryParse(b['refund_usd'].toString()) ?? 0) > 0)
+          Text('Returned to wallet: ${FaxPlatformApi.usd(b['refund_usd'])}'),
+        if (!pending && b['billed_seconds'] != null) Text('Provider billed time: ${b['billed_seconds']} seconds (all SIP legs)'),
+        if (!pending && b['average_page_usd'] != null) Text('Average final fee/page: ${FaxPlatformApi.usd(b['average_page_usd'])}'),
+        if (b['updated_at'] != null) Text('Bill updated: ${_formatDate(DateTime.tryParse(b['updated_at'].toString()))}', style: const TextStyle(fontSize: 12)),
+        if (state == 'payment_due') const Text('Not deducted yet. Open this fax to pay.'),
+      ],
+    ));
   }
 
   @override
@@ -232,6 +253,7 @@ class _FaxHistoryScreenState extends State<FaxHistoryScreen>
                     const SizedBox(height: 5),
                     Text('${fax.pages} page${fax.pages == 1 ? '' : 's'}'),
                   ],
+                  _billing(fax),
                   if (FaxStatusChip.normalize(fax.status) == 'failed') ...[
                     const SizedBox(height: 10),
                     Container(
