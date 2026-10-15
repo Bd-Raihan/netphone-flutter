@@ -16,7 +16,7 @@ class AdminFaxManagementScreen extends StatefulWidget {
 
 class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
   List<Map<String, dynamic>> _rates = [], _inbox = [];
-  bool _loading = true, _charging = false, _busy = false, _adminVerified = false;
+  bool _loading = true, _busy = false, _adminVerified = false;
   String? _error;
   String? _lastUpload;
   Map<String, dynamic> _actual = {}; 
@@ -44,7 +44,7 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
       if (!mounted) return;
       setState(() {
         _rates = _items(results[0]['rates']); _inbox = _items(results[1]['faxes']);
-        _charging = results[0]['billing_enabled'] == true; _actual = results[2]; _error = null;
+        _actual = results[2]; _error = null;
       });
     } catch (error) {
       if (mounted) setState(() {_error = error.toString();});
@@ -55,25 +55,6 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
 
   void _message(String message) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _toggle(bool enabled) async {
-    if (_busy) return;
-    if (enabled) {
-      final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
-        title: const Text('Enable fax charging?'),
-        content: const Text('Enable after the Fax deck import and a verified Telnyx usage sync. '
-          'Users approve a prepaid ceiling. Actual billing is finalized later; overruns are absorbed by the operator. Update the user app first.'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, true), child: const Text('Enable'))]));
-      if (approved != true || !mounted) return;
-    }
-    setState(() {_busy = true;});
-    try {
-      await FaxPlatformApi.request('/admin/settings', method: 'PATCH', body: {'billing_enabled': enabled});
-      await _load();
-    } catch (error) {_message(error.toString());}
-    finally {if (mounted) setState(() {_busy = false;});}
   }
 
   Future<void> _importCsv(bool deck) async {
@@ -159,7 +140,7 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
   Future<void> _assign(Map<String, dynamic> fax) async {
     var code = '', reference = '';
     var assigned = false;
-    var verified = false, waive = false, saving = false;
+    var verified = false, saving = false;
     String? error;
     await showDialog<void>(context: context, barrierDismissible: false, builder: (dialogContext) =>
         StatefulBuilder(builder: (context, update) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
@@ -175,9 +156,6 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
               CheckboxListTile(contentPadding: EdgeInsets.zero, value: verified,
                 title: const Text('I checked the document and verified this recipient.'),
                 onChanged: saving ? null : (value) => update(() {verified = value == true;})),
-              CheckboxListTile(contentPadding: EdgeInsets.zero, value: waive,
-                title: const Text('Waive receive fee for this document'),
-                onChanged: saving ? null : (value) => update(() {waive = value == true;})),
               if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
             ]))),
           actions: [TextButton(onPressed: saving ? null : () => Navigator.pop(dialogContext), child: const Text('Cancel')),
@@ -186,7 +164,7 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
               try {
                 await FaxPlatformApi.request('/admin/inbox/${fax['id']}/assign', method: 'POST', body: {
                   'receive_code': code.trim(), 'verified_reference': reference.trim(),
-                  'recipient_verified': verified, 'waive_fee': waive,
+                  'recipient_verified': verified,
                 });
                 assigned = true;
                 if (dialogContext.mounted) {
@@ -253,35 +231,27 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
             'Browse provider rates by country. Set a minimum selling price per page; automatic actual-cost billing continues.', [
               FilledButton.icon(onPressed: _busy ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminFaxPricingScreen())), icon: const Icon(Icons.price_change), label: const Text('View / Edit country rates')),
             ]),
-          _stepCard('1. Fax rate chart',
+          _stepCard('Fax rate chart',
             'Upload the Telnyx Global Conversational rate CSV. Extract the ZIP first.', [
               _uploadButton('Upload rate CSV', () => _importCsv(true)),
               const SizedBox(height: 10),
               Text(_actual['deck_version'] == null ? 'Status: Not uploaded' : 'Status: Rate chart ready'),
             ]),
-          _stepCard('2. Billing connection',
-            'Sync Telnyx billing records. Both Send and Receive must be verified before charging.', [
-              _uploadButton('Sync billing', _syncUsage),
-              const SizedBox(height: 10),
-              Text(_actual['adapter_verified'] == true ? 'Status: Verified' : 'Status: Verification pending'),
-              Text('Last sync: ${_actual['last_usage_sync'] == null ? 'Not completed' : _date(_actual['last_usage_sync'])}'),
-              if (_actual['usage_sync_error'] != null) Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text('Automatic sync needs attention. See Billing details below.',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
-              ),
-            ]),
-          Card(margin: const EdgeInsets.only(bottom: 14), child: SwitchListTile(
-            title: const Text('3. Enable fax charging'), value: _charging,
-            subtitle: const Text('Turn on after billing verification and a small paid test.'),
-            onChanged: _busy || (!_charging && _actual['adapter_verified'] != true) ? null : _toggle)),
+          const Card(child: Padding(padding: EdgeInsets.all(16), child: Text(
+            'Fax charging is automatic. Final fees use provider cost + 40%, or your higher page minimum.'))),
+          if (_actual['usage_sync_error'] != null || _actual['adapter_verified'] != true)
+            const Padding(padding: EdgeInsets.all(12), child: Text(
+              'Billing needs attention. New sends may be unavailable. Open Troubleshooting below.',
+              style: TextStyle(color: Colors.red))),
           if (_busy) const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: LinearProgressIndicator()),
           if (_lastUpload != null) Padding(padding: const EdgeInsets.only(bottom: 14), child: Text(_lastUpload!)),
           Card(margin: const EdgeInsets.only(bottom: 14), child: ExpansionTile(
-            title: const Text('Manual usage reports'),
+            title: const Text('Troubleshooting'),
             subtitle: const Text('Use when automatic sync needs review'),
             childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             children: [
+              TextButton(onPressed: _busy ? null : _syncUsage, child: const Text('Retry billing sync')),
+              Text('Last sync: ${_actual['last_usage_sync'] == null ? 'Pending' : _date(_actual['last_usage_sync'])}'),
               const Text('Upload Fax API and Calls CSV reports for the same dates. Reports do not replace the rate chart.'),
               const SizedBox(height: 12),
               SizedBox(width: double.infinity, child: _uploadButton('Upload usage CSV', () => _importCsv(false), secondary: true)),

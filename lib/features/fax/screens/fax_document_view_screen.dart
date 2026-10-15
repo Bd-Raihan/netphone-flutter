@@ -24,6 +24,7 @@ class _FaxDocumentViewScreenState extends State<FaxDocumentViewScreen> {
   bool _opening = false;
   bool _saving = false;
   bool _refreshing = false;
+  Map<String, dynamic>? _receiveBill;
 
   bool get _documentBusy => _opening || _saving;
 
@@ -53,6 +54,12 @@ class _FaxDocumentViewScreenState extends State<FaxDocumentViewScreen> {
         }
       }
 
+      Map<String, dynamic>? bill;
+      if (_fax.direction.toLowerCase() == 'inbound') {
+        bill = await FaxPlatformApi.request('/billing/${_fax.id}');
+        if (!mounted) return;
+      }
+      setState(() => _receiveBill = bill);
       final matchingFax = updatedFax;
       if (matchingFax != null) {
         setState(() => _fax = matchingFax);
@@ -76,19 +83,34 @@ class _FaxDocumentViewScreenState extends State<FaxDocumentViewScreen> {
     if (_fax.direction.toLowerCase() != 'inbound') return true;
     final bill = await FaxPlatformApi.request('/billing/${_fax.id}');
     if (!mounted) return false;
+    if (bill['billing_pending'] == true) {
+      _showMessage('Your fax is received. Provider billing is pending; try opening it again later.');
+      return false;
+    }
     if (bill['payment_required'] != true) return true;
-    final approved = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-      title: const Text('Receive Fax Fee'),
-      content: Text('${bill['pages']} pages\nFee: ${FaxPlatformApi.usd(bill['amount_usd'])}\n\n'
-        'Pay once to view and download this document.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Pay & Open'))],
-    ));
-    if (approved != true || !mounted) return false;
-    await FaxPlatformApi.request('/billing/${_fax.id}/pay', method: 'POST', body: {
-      'expected_amount_microusd': bill['amount_microusd'],
-    });
-    return mounted;
+    setState(() => _receiveBill = bill);
+    _showMessage('Receive fee unpaid. Recharge for automatic payment, or use the Pay Receive Fee button.');
+    return false;
+  }
+
+  Future<void> _payReceiveFee() async {
+    if (_documentBusy) return;
+    setState(() => _opening = true);
+    try {
+      final bill = await FaxPlatformApi.request('/billing/${_fax.id}');
+      if (bill['payment_required'] == true && bill['billing_pending'] != true) {
+        await FaxPlatformApi.request('/billing/${_fax.id}/pay', method: 'POST', body: {
+          'expected_amount_microusd': bill['amount_microusd'],
+        });
+      }
+      await _refreshStatus(showError: true);
+    } on FaxApiException catch (e) {
+      _showMessage(e.message);
+    } catch (_) {
+      _showMessage('Payment could not be confirmed. Refresh before trying again.');
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
   }
 
   Future<void> _openDocument() async {
@@ -243,6 +265,11 @@ class _FaxDocumentViewScreenState extends State<FaxDocumentViewScreen> {
                     ? 'Submission not confirmed. Refresh the status before trying again.'
                     : reason,
               ),
+            if (_receiveBill?['payment_required'] == true && _receiveBill?['billing_pending'] != true)
+              Padding(padding: const EdgeInsets.only(bottom: 12), child: FilledButton(
+                onPressed: _documentBusy ? null : _payReceiveFee,
+                child: Text('Pay Receive Fee ${FaxPlatformApi.usd(_receiveBill?['amount_usd'])}'),
+              )),
             const SizedBox(height: 16),
             SizedBox(
               height: 52,

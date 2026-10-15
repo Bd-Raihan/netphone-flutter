@@ -72,7 +72,8 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
         type == 'recharge';
   }
 
-  String formatDisplayFromUsd(double usdAmount) {
+  String formatDisplayFromUsd(double usdAmount, {bool fax = false}) {
+    if (fax && displayCurrencyCode == 'USD') return formatUsdAmount(usdAmount, exact: true, fax: true);
     final displayAmount = ExchangeRateService.instance.convertUsdTo(
       usdAmount,
       displayCurrencyCode,
@@ -84,13 +85,13 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
     );
   }
 
-  String formatUsdAmount(double usdAmount, {bool exact = false}) {
+  String formatUsdAmount(double usdAmount, {bool exact = false, bool fax = false}) {
     if (!usdAmount.isFinite) {
       return r'$0.00';
     }
 
     if (exact) {
-      return '\$${usdAmount.abs().toStringAsFixed(4)}';
+      return '\$${usdAmount.abs().toStringAsFixed(fax ? 6 : 4)}';
     }
 
     return CurrencyFormatter.formatUsd(usdAmount.abs());
@@ -201,16 +202,14 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                 final tx = transactions[index];
                 final positive = isPositive(tx.type);
                 final isFax = tx.type == 'fax_charge' || tx.type == 'fax_refund';
-                final amountDisplay = isFax && displayCurrencyCode == 'USD'
-                    ? '\$${tx.amount.abs().toStringAsFixed(6)}'
-                    : formatDisplayFromUsd(tx.amount);
+                final amountDisplay = formatDisplayFromUsd(tx.amount.abs(), fax: isFax);
                 final amountUsd = formatUsdAmount(
                   tx.amount,
-                  exact: tx.type == 'call_charge' || isFax,
+                  exact: tx.type == 'call_charge' || isFax, fax: isFax,
                 );
 
                 final balanceDisplay = formatDisplayFromUsd(tx.balanceAfter);
-                final balanceUsd = formatUsdAmount(tx.balanceAfter);
+                final balanceUsd = formatUsdAmount(tx.balanceAfter, exact: isFax, fax: isFax);
                 final transactionPhone = getTransactionPhone(tx);
                 final formattedDate = formatTransactionDate(tx.createdAt);
 
@@ -233,7 +232,9 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
                           children: [
                             Expanded(
                               child: Text(
-                                getTitle(tx.type),
+                                tx.type == 'fax_charge'
+                                    ? (tx.meta?['direction'] == 'inbound' ? 'Fax Receive Charge' : tx.meta?['direction'] == 'outbound' ? 'Fax Send Charge' : 'Fax Charge')
+                                    : getTitle(tx.type),
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 18,
