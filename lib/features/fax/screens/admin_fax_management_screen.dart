@@ -238,7 +238,7 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
               Text(_actual['deck_version'] == null ? 'Status: Not uploaded' : 'Status: Rate chart ready'),
             ]),
           const Card(child: Padding(padding: EdgeInsets.all(16), child: Text(
-            'Fax charging is automatic. Final fees use provider cost + 40%, or your higher page minimum.'))),
+            'Fax charging is automatic. Final fees use provider cost + 55%, or your higher page minimum.'))),
           if (_actual['usage_sync_error'] != null || _actual['adapter_verified'] != true)
             const Padding(padding: EdgeInsets.all(12), child: Text(
               'Billing needs attention. New sends may be unavailable. Open Troubleshooting below.',
@@ -261,7 +261,7 @@ class _AdminFaxManagementScreenState extends State<AdminFaxManagementScreen> {
             title: const Text('Billing details'),
             childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             children: [
-              const Text('Final fee = the higher of (actual Fax API + SIP cost) × 1.40 and your manual per-page minimum. Unused Send prepayment is refunded. The customer is never charged above the approved ceiling. Failed transmissions may incur fees.'),
+              const Text('Final fee = the higher of (actual Fax API + SIP cost) × 1.55 and your manual per-page minimum. Unused Send prepayment is refunded. The customer is never charged above the approved ceiling. Failed transmissions may incur fees.'),
               const SizedBox(height: 8),
               const Text('Costs above the Send ceiling are absorbed by the operator. The estimate is not a transmission time limit.'),
               TextButton(onPressed: _busy ? null : _estimate, child: const Text('Send prepayment estimate')),

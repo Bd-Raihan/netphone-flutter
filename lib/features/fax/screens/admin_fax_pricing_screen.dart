@@ -52,7 +52,7 @@ class _AdminFaxPricingScreenState extends State<AdminFaxPricingScreen> {
     await showDialog<void>(context: context, barrierDismissible: false, builder: (dialog) => StatefulBuilder(builder: (context, update) => AlertDialog(
       title: Text(rule == null ? 'Add manual page minimum' : 'Edit manual page minimum'),
       content: SizedBox(width: 440, child: SingleChildScrollView(child: Form(key: form, child: Column(mainAxisSize: MainAxisSize.min, children: [
-        const Text('Final price uses the higher of your page minimum and actual provider cost + 40%. Turning this rule off restores automatic pricing. Send approval limits still apply.'),
+        const Text('Final price uses the higher of your page minimum and actual provider cost + 55%. Turning this rule off restores automatic pricing. Send approval limits still apply.'),
         TextFormField(initialValue: name, enabled: !saving, decoration: const InputDecoration(labelText: 'Country / region'), onChanged: (v) => name = v,
           validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
         TextFormField(initialValue: iso, enabled: !saving, decoration: const InputDecoration(labelText: 'Country ISO (US, BD, KW)'), onChanged: (v) => iso = v.toUpperCase().trim(),
@@ -81,7 +81,7 @@ class _AdminFaxPricingScreenState extends State<AdminFaxPricingScreen> {
   Widget build(BuildContext context) => FaxBlueTheme(builder: (context) => Scaffold(
     appBar: AppBar(title: const Text('Fax Country Rates')),
     body: RefreshIndicator(onRefresh: _load, child: ListView(padding: const EdgeInsets.all(16), children: [
-      const Text('Automatic: (actual Fax API + SIP cost) × 1.40. SIP is billed by time; final price per page varies with duration. Manual settings apply to new faxes only.'),
+      const Text('Automatic: (actual Fax API + SIP cost) × 1.55. SIP is billed by time; final price per page varies with duration. Manual settings apply to new faxes only.'),
       const SizedBox(height: 12),
       FilledButton.icon(onPressed: _busy ? null : () => _edit(), icon: const Icon(Icons.add), label: const Text('Add manual page minimum')),
       for (final r in _rules) Card(child: ListTile(
@@ -93,12 +93,12 @@ class _AdminFaxPricingScreenState extends State<AdminFaxPricingScreen> {
       TextField(controller: _search, decoration: const InputDecoration(labelText: 'Search provider country / ISO / prefix', hintText: 'United States, US, 880', prefixIcon: Icon(Icons.search)), onSubmitted: (_) => _load()),
       const SizedBox(height: 8),
       OutlinedButton(onPressed: _busy ? null : () => _load(), child: const Text('Search rates')),
-      Text('Provider Fax API: $_api/page. SIP charges below are additional provider costs (before 40%). Origin restrictions and billing intervals affect the selected route.'),
+      Text('Provider Fax API: $_api/page. SIP charges below are additional provider costs (before 55%). Origin restrictions and billing intervals affect the selected route.'),
       if (_busy) const LinearProgressIndicator(),
       if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
       for (final r in _routes) Card(child: ListTile(
         title: Text("${r['country']} (${r['iso']}) · +${r['prefix']}"),
-        subtitle: Text("SIP: ${FaxPlatformApi.usd(r['sip_minute_usd'])}/minute · with 40%: ${FaxPlatformApi.usd(r['sell_sip_minute_usd'])}/minute\n${FaxPlatformApi.usd(r['per_call_usd'])}/attempt\nFirst ${r['first']}s / next ${r['next']}s · Origin: ${r['origin'] == '' ? 'Any' : r['origin']} · ${r['exact'] == true ? 'Exact destination' : 'Prefix route'}"),
+        subtitle: Text("SIP: ${FaxPlatformApi.usd(r['sip_minute_usd'])}/minute · with 55%: ${FaxPlatformApi.usd(r['sell_sip_minute_usd'])}/minute\n${FaxPlatformApi.usd(r['per_call_usd'])}/attempt\nFirst ${r['first']}s / next ${r['next']}s · Origin: ${r['origin'] == '' ? 'Any' : r['origin']} · ${r['exact'] == true ? 'Exact destination' : 'Prefix route'}"),
       )),
       if (_more) OutlinedButton(onPressed: _busy ? null : () => _load(next: true), child: const Text('Load next 50')),
     ])),

@@ -119,16 +119,7 @@ class _SendFaxScreenState extends State<SendFaxScreen> {
           return;
         }
       }
-      final confirmed = await showDialog<bool>(context: context, builder: (context) => AlertDialog(backgroundColor: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF16232F) : Colors.white, surfaceTintColor: Colors.transparent, 
-        title: const Text('Confirm Fax'),
-        content: Text('To: ${_toController.text.trim()}\n'
-          '${quote['pages'] == null ? '' : 'Pages: ${quote['pages']}\n'}'
-          'Pay now: ${FaxPlatformApi.usd(quote['amount_usd'])}\n\n'
-          '${quote['dynamic'] == true ? 'This amount is deducted before sending. Final fee uses actual cost + 40%, or a higher page minimum, up to this approved amount. Any unused amount is refunded. Failed attempts may cost money.' : 'The fee is charged before sending. If the fax fails, the prepaid fax fee is refunded.'}'),
-        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(style: FilledButton.styleFrom(backgroundColor: const Color(0xFF168FE5), foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, true), child: const Text('Confirm & Send'))],
-      ));
-      if (confirmed != true || !mounted) return;
+      if (!mounted) return;
       submissionStarted = true;
       _submissionAttempted = true;
 
