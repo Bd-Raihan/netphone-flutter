@@ -1,14 +1,14 @@
-/// =======================================================
-/// main_navigation_screen.dart
-///
-/// কাজ:
-/// - Main Bottom Navigation
-/// - Dial Pad
-/// - Recents
-/// - Wallet
-/// - Settings
-/// - Dynamic Drawer App Pages
-/// =======================================================
+// =======================================================
+// main_navigation_screen.dart
+//
+// কাজ:
+// - Main Bottom Navigation
+// - Dial Pad
+// - Recents
+// - Wallet
+// - Settings
+// - Dynamic Drawer App Pages
+// =======================================================
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:share_plus/share_plus.dart';
@@ -500,14 +500,22 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
           boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10.r)],
         ),
         child: BottomNavigationBar(
-          currentIndex: currentIndex,
+          currentIndex: currentIndex >= 3 ? currentIndex + 1 : currentIndex,
           onTap: (index) {
-            if (index == currentIndex) {
+            if (index == 3) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const FaxHomeScreen()),
+              );
+              return;
+            }
+            final screenIndex = index > 3 ? index - 1 : index;
+            if (screenIndex == currentIndex) {
               return;
             }
 
             setState(() {
-              currentIndex = index;
+              currentIndex = screenIndex;
             });
           },
           type: BottomNavigationBarType.fixed,
@@ -527,6 +535,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen>
             BottomNavigationBarItem(
               icon: Icon(Icons.history),
               label: "Recents",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.fax),
+              label: "Fax",
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.account_balance_wallet),
